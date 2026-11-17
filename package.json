@@ -37,8 +37,7 @@
     "cordis.patch.yml",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE",
-    "README.zh-CN.md"
+    "LICENSE"
   ],
   "engines": {
     "dsh": ">=0.2.1-rc.2 <0.3.0",
