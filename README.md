@@ -10,6 +10,30 @@
 > **每个讨论串都懂的项目说明**、**一眼看完的看板面板**、**开新讨论串时的自动简报**、
 > **跨会话的上下文接续**。
 
+## 强化了 lead 与 thread 的分工
+
+不只是补功能，还把这套分工调到位——**主对话当 lead，讨论串当手**：
+
+- **主对话会主动开 thread**：默认不再先弹确认卡（`offerApproval: "open"`），判断该派活就直接派，
+  开完立刻回来陪你，不等、不轮询
+- **回报自动汇总**：讨论串每轮回报自动变成看板任务（按 `threadId` 幂等去重），不用手工记账
+- **上下文自动交互**：项目说明、看板快照、其它讨论串的进展，每个新 thread 第一步就带上
+- **并发上限 6 个讨论串**（dsh-threads 默认 3 个，满了会回「或者这件事在主对话里做」）
+- 目标是把 **Claude Code（Opus 5.5 一代）**那套项目体验尽量搬过来：项目 → 讨论串 → 汇报 → 继续派活
+
+### 让这套分工生效的两行配置
+
+本插件不改 dsh-threads 的提示词；分工效果来自 dsh-threads 自己的 dispatcher prompt + 下面两个开关：
+
+```yaml
+- id: dsh-threads
+  name: '@kyf-eng/dsh-threads'
+  config:
+    offerApproval: "open"   # 用户点名任务但没明说开 thread 时，直接开、不弹确认卡
+    maxRunning: 6           # 同时最多 6 个讨论串（默认 3）
+```
+
+改完完全退出 DSH 再启动。
 ## 和 dsh-threads 的关系：补强，不是替代
 
 | 能力 | `@kyf-eng/dsh-threads` | 本插件 `dsh-claude-project-ui` |
@@ -203,6 +227,37 @@ the interaction model and the context logic Claude users expect.
 > read at a glance**, **an automatic brief when a thread is opened**, and **context that carries
 > over between sessions**.
 
+## A sharper lead / thread split
+
+This is not only extra features — it tightens the division of labour so the **main conversation leads and
+threads do the hands-on work**:
+
+- **The main conversation opens threads on its own**: with `offerApproval: "open"` it no longer asks for
+  confirmation first, delegates when it judges the work belongs in a thread, and returns to you immediately
+  without waiting or polling
+- **Reports roll up automatically**: each thread report becomes a board task (idempotent, keyed by
+  `threadId`) — no manual bookkeeping
+- **Context flows without you**: project brief, board snapshot and other threads' progress are attached to
+  every new thread from its first step
+- **Up to 6 concurrent threads** (dsh-threads defaults to 3, and at the cap it answers "or do the work in the
+  main conversation")
+- The goal is to bring the **Claude Code (the Opus 5.5 generation)** project experience over as closely as
+  possible: project → threads → reports → keep delegating
+
+### The two settings that make it behave this way
+
+This plugin does not touch dsh-threads' prompt; the behaviour comes from that plugin's own dispatcher prompt
+plus these two switches:
+
+```yaml
+- id: dsh-threads
+  name: '@kyf-eng/dsh-threads'
+  config:
+    offerApproval: "open"   # open the thread right away instead of asking first
+    maxRunning: 6           # up to 6 concurrent threads (default 3)
+```
+
+Quit DSH completely and start it again after editing.
 ## Relationship to dsh-threads: a complement, not a replacement
 
 | Capability | `@kyf-eng/dsh-threads` | This plugin `dsh-claude-project-ui` |
