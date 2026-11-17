@@ -18,7 +18,7 @@ import { kbIndexText, loadKb, loadKbSync } from "./kb.js";
 import { boardContextText, boardView, convergeThreads, loadBoard, loadBoardSync } from "./board.js";
 import { digestText, eventsOf, loadNotes, loadNotesSync } from "./digest.js";
 
-export const name = "dsh-project-hub";
+export const name = "dsh-claude-project-ui";
 export const inject = ["tools", "agents", "commands"];
 
 // Both helpers live in the DSH host. Resolve them defensively so the module also
@@ -49,14 +49,14 @@ export async function apply(ctx, config) {
 
   const warn = (message) => {
     try {
-      ctx.logger?.warn?.("dsh-project-hub: " + message);
+      ctx.logger?.warn?.("dsh-claude-project-ui: " + message);
     } catch {
       // never let logging break the host
     }
   };
   const info = (message) => {
     try {
-      ctx.logger?.info?.("dsh-project-hub: " + message);
+      ctx.logger?.info?.("dsh-claude-project-ui: " + message);
     } catch {
       // ignore
     }

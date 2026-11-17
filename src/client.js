@@ -5,7 +5,7 @@
 // overlay panel behind it; the data comes from POST /project-hub/board, served
 // by this package's host half.
 window.__ModuleLoader__.load({
-  id: "dsh-project-hub",
+  id: "dsh-claude-project-ui",
   factory: (require) => {
     const React = require("react");
     const h = React.createElement;
@@ -263,13 +263,13 @@ window.__ModuleLoader__.load({
       } catch (error) {
         // A missing slot in this host generation must not break the shell.
         try {
-          console.warn("dsh-project-hub: board panel not mounted:", error);
+          console.warn("dsh-claude-project-ui: board panel not mounted:", error);
         } catch {
           /* ignore */
         }
       }
     }
 
-    return { name: "dsh-project-hub", inject: ["slots"], apply };
+    return { name: "dsh-claude-project-ui", inject: ["slots"], apply };
   }
 });

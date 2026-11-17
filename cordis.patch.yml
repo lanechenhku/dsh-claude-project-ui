@@ -1,6 +1,6 @@
-# Bundle patch for dsh-project-hub, applied when this bundle is enabled in a profile.
+# Bundle patch for dsh-claude-project-ui, applied when this bundle is enabled in a profile.
 # The row's `name` must match the package name so DSH also discovers its metadata.
 - insert:
-    - id: dsh-project-hub
-      name: 'dsh-project-hub'
+    - id: dsh-claude-project-ui
+      name: 'dsh-claude-project-ui'
       config: {}

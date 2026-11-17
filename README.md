@@ -1,13 +1,27 @@
-# dsh-project-hub
+# dsh-claude-project-ui
 
-一个 DeepSeek Harness 插件，给 [@kyf-eng/dsh-threads](https://github.com/Kyf-eng/dsh-threads) 的「项目 + 讨论串」补三件它没有的东西：
+把 **Claude Code 的 Projects + Threads 体验**搬进 DeepSeek Harness —— 在
+[@kyf-eng/dsh-threads](https://github.com/Kyf-eng/dsh-threads) 之上，补出 Claude 用户熟悉的那套
+项目界面、交互方式和上下文逻辑。
 
-1. **项目短约定（A）** —— 少量、必须让每个讨论串都看见的约定（几十字的规则、发布口径）。索引最多列 3 条、280 字符；
-   长文档、目录、PDF 的检索交给 `dsh-knowledge`（`knowledge_search`），两边不抢上下文。
-2. **跨讨论串看板（B）** —— 讨论串的实时状态（来自 dsh-threads 自己的记录，只读）加上一层手动任务，所有项目会话都能看到同一份看板。
-3. **上下文接续（C）** —— 一条 `context_brief` 工具/命令，把目标、项目说明、看板、知识库索引、各讨论串最近的回报拼成可直接粘进 `thread_open.task` 的简报；讨论串会话启动时也会自动收到同一份摘要，不用再靠手写 brief。
+> 一句话：dsh-threads 给出「项目 + 讨论串」的骨架；本插件补上 Claude 用户习惯的四件事——
+> **每个讨论串都懂的项目说明**、**一眼看完的看板面板**、**开新讨论串时的自动简报**、
+> **跨会话的上下文接续**。
 
-它**不修改也不依赖 dsh-threads 的模块**，只读它的存储文件来识别「这个会话属于哪个项目、是不是讨论串」；两个插件任何一个卸载，另一个都照常工作。
+## 和 dsh-threads 的关系：补强，不是替代
+
+| 能力 | `@kyf-eng/dsh-threads` | 本插件 `dsh-claude-project-ui` |
+|---|---|---|
+| 项目 / 讨论串的创建与生命周期 | ✅ 拥有 | 只读识别，绝不写它的数据 |
+| 主对话当 lead、主动开 thread | ✅ 提示词 + `thread_open` | — |
+| 项目级说明（每个 thread 都看到） | ❌ 只有主对话自己的 instructions | ✅ 短约定注入主对话和所有讨论串 |
+| 跨 thread 的看板 | ❌ | ✅ 侧栏面板 + `/hub board` 命令 + `board_list` 工具 |
+| 开 thread 时的上下文简报 | 手写 `task` 文本 | ✅ `context_brief` 一键拼好 |
+| 讨论串回报汇聚成任务 | ❌ | ✅ 幂等自动汇总（按 `threadId` 去重） |
+| 讨论串建好时的启动上下文 | — | ✅ 自动注入项目说明 + 看板 + 他人进展 |
+
+两个插件通过**只读存储文件**解耦：本插件不 import dsh-threads 的模块，也不写它的存储。
+任何一个卸载，另一个照常工作；dsh-threads 换存储格式时本插件静默降级为「不注入」，不会报错。
 
 ## 功能
 

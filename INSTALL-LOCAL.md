@@ -6,11 +6,11 @@ DSH 桌面版正在运行时，`dsh plugin --profile desktop add` 会被拒绝
 （`profile "desktop" is managed exclusively by the Electron application`），
 所以这次用「开发链接」安装，等价于 pnpm 的 `link:` 依赖：
 
-1. `~/.dsh/profiles/desktop/node_modules/dsh-project-hub` → 指到本目录的符号链接
+1. `~/.dsh/profiles/desktop/node_modules/dsh-claude-project-ui` → 指到本目录的符号链接
 2. `~/.dsh/profiles/desktop/package.json`
-   - `dependencies["dsh-project-hub"] = "link:/Users/lanechen/Documents/deepseek-harness/default-workspace/dsh-project-hub"`
-   - `dsh.profile.bundles` 末尾追加 `dsh-project-hub`
-3. 插件靠自己的 `cordis.patch.yml` 插入 loader 行（`id: dsh-project-hub`）
+   - `dependencies["dsh-claude-project-ui"] = "link:/Users/lanechen/Documents/deepseek-harness/default-workspace/dsh-claude-project-ui"`
+   - `dsh.profile.bundles` 末尾追加 `dsh-claude-project-ui`
+3. 插件靠自己的 `cordis.patch.yml` 插入 loader 行（`id: dsh-claude-project-ui`）
 
 因为符号链接指向源码，**改 src 后只需重启 DSH 就生效**，不用重新安装、不用构建。
 
@@ -36,7 +36,7 @@ DSH 桌面版正在运行时，`dsh plugin --profile desktop add` 会被拒绝
 ## 回滚
 
 ```sh
-rm ~/.dsh/profiles/desktop/node_modules/dsh-project-hub
+rm ~/.dsh/profiles/desktop/node_modules/dsh-claude-project-ui
 # 从备份恢复 manifest（安装前的版本）
 cp ~/.dsh/backup-project-hub-20261118-010512/package.json ~/.dsh/profiles/desktop/package.json
 ```
@@ -46,9 +46,9 @@ cp ~/.dsh/backup-project-hub-20261118-010512/package.json ~/.dsh/profiles/deskto
 完全退出 DSH 后，把开发链接换成 pnpm 管理的版本（本地 tgz 或发布后的 npm 包）：
 
 ```sh
-rm ~/.dsh/profiles/desktop/node_modules/dsh-project-hub
+rm ~/.dsh/profiles/desktop/node_modules/dsh-claude-project-ui
 # 先按上面「回滚」恢复 manifest，再：
-dsh plugin --profile desktop add ./dsh-project-hub/dist/dsh-project-hub-0.1.0.tgz
+dsh plugin --profile desktop add ./dsh-claude-project-ui/dist/dsh-claude-project-ui-0.1.0.tgz
 ```
 
-装完确认 `dsh.profile.bundles` 仍有 `dsh-project-hub`（`dsh plugin add` 不负责 bundles 列表）。
+装完确认 `dsh.profile.bundles` 仍有 `dsh-claude-project-ui`（`dsh plugin add` 不负责 bundles 列表）。

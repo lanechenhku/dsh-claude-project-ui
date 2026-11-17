@@ -1,7 +1,7 @@
 {
-  "name": "dsh-project-hub",
+  "name": "dsh-claude-project-ui",
   "version": "0.2.0",
-  "description": "DeepSeek Harness plugin: a project-wide knowledge base, a cross-thread board and carried-over context for dsh-threads projects.",
+  "description": "Claude-style Projects + Threads for DeepSeek Harness: a project workspace UI on top of @kyf-eng/dsh-threads (shared project briefs, a cross-thread board panel, carried-over context).",
   "keywords": [
     "deepseek-harness",
     "dsh",
@@ -9,18 +9,21 @@
     "threads",
     "knowledge",
     "board",
-    "context"
+    "context",
+    "claude-code",
+    "projects",
+    "dsh-threads"
   ],
   "type": "module",
   "license": "MIT",
   "author": "Lane Chen <lanechenhku@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lanechenhku/dsh-project-hub.git"
+    "url": "git+https://github.com/lanechenhku/dsh-claude-project-ui.git"
   },
-  "homepage": "https://github.com/lanechenhku/dsh-project-hub#readme",
+  "homepage": "https://github.com/lanechenhku/dsh-claude-project-ui#readme",
   "bugs": {
-    "url": "https://github.com/lanechenhku/dsh-project-hub/issues"
+    "url": "https://github.com/lanechenhku/dsh-claude-project-ui/issues"
   },
   "main": "./src/index.js",
   "exports": {
