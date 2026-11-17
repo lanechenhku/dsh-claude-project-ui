@@ -22,7 +22,10 @@ import { boardContextText, boardView, convergeThreads, loadBoard, loadBoardSync 
 import { digestText, eventsOf, loadNotes, loadNotesSync } from "./digest.js";
 
 export const name = "dsh-claude-project-ui";
-export const inject = ["tools", "agents", "commands"];
+// webServer is declared because Cordis refuses `ctx.get("webServer")` / `ctx.webServer`
+// unless the service is injected. Profiles without a web server (tui / headless) simply
+// keep this plugin waiting, which is the same trade-off dsh-git-graph makes.
+export const inject = ["tools", "agents", "commands", "webServer"];
 
 // Both helpers live in the DSH host. Resolve them defensively so the module also
 // loads outside the host (tests, tooling) instead of failing at import time.
@@ -127,8 +130,7 @@ export async function apply(ctx, config) {
   };
 
   try {
-    const webServer =
-      (typeof ctx.get === "function" ? ctx.get("webServer") : undefined) ?? ctx.webServer;
+    const webServer = ctx.webServer;
     if (webServer !== undefined && webServer !== null && typeof webServer.register === "function") {
       const off = webServer.register({
         kind: "exact",
@@ -149,7 +151,7 @@ export async function apply(ctx, config) {
       info("board panel route at " + BOARD_ROUTE);
       breadcrumb("route registered at " + BOARD_ROUTE);
     } else {
-      breadcrumb("no webServer on ctx (get=" + typeof ctx.get + ", prop=" + typeof ctx.webServer + ")");
+      breadcrumb("no webServer service on ctx");
     }
   } catch (error) {
     warn("cannot register the board route: " + String(error));
