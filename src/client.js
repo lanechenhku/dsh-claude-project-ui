@@ -1,9 +1,8 @@
-// dsh-project-hub — browser half.
+// dsh-claude-project-ui — browser half.
 //
-// Loaded by the DSH web GUI through window.__ModuleLoader__ (same envelope the
-// official client plugins use). Registers one sidebar-footer button and the
-// overlay panel behind it; the data comes from POST /project-hub/board, served
-// by this package's host half.
+// Registers a "项目看板" tab in the right-hand sidebar pane (the same pane that
+// hosts dsh-threads' thread list), plus a small header button that opens it.
+// Data comes from POST /project-hub/board, served by this package's host half.
 window.__ModuleLoader__.load({
   id: "dsh-claude-project-ui",
   factory: (require) => {
@@ -11,24 +10,9 @@ window.__ModuleLoader__.load({
     const h = React.createElement;
 
     const ROUTE = "/project-hub/board";
-
-    // ---------- shared open/closed state between the two slots ----------
-    const store = {
-      open: false,
-      listeners: new Set(),
-      subscribe(fn) {
-        store.listeners.add(fn);
-        return () => store.listeners.delete(fn);
-      },
-      getSnapshot() {
-        return store.open;
-      },
-      set(next) {
-        if (store.open === next) return;
-        store.open = next;
-        for (const fn of [...store.listeners]) fn();
-      }
-    };
+    const TAB_ID = "project-hub";
+    const TAB_KIND = "project-hub";
+    const TAB_TITLE = "项目看板";
 
     // ---------- data ----------
     const cache = { at: 0, data: null, pending: null };
@@ -52,7 +36,7 @@ window.__ModuleLoader__.load({
       return cache.pending;
     }
 
-    function useBoard(open) {
+    function useBoard() {
       const [state, setState] = React.useState({ loading: true, error: null, projects: [] });
       const refresh = React.useCallback(() => {
         setState((prev) => ({ loading: true, error: null, projects: prev.projects }));
@@ -62,107 +46,33 @@ window.__ModuleLoader__.load({
         );
       }, []);
       React.useEffect(() => {
-        if (open) refresh();
-      }, [open, refresh]);
+        refresh();
+      }, [refresh]);
       return { loading: state.loading, error: state.error, projects: state.projects, refresh };
     }
 
-    // ---------- styles (inline: no stylesheet to load, survives theme changes) ----------
+    // ---------- styles ----------
     const S = {
-      button: {
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        border: "1px solid rgba(127,127,127,0.28)",
-        background: "transparent",
-        color: "inherit",
-        borderRadius: 8,
-        padding: "5px 10px",
-        fontSize: 12,
-        lineHeight: 1.4,
-        cursor: "pointer"
-      },
-      overlay: {
-        position: "fixed",
-        top: 56,
-        right: 16,
-        bottom: 16,
-        width: 420,
-        maxWidth: "calc(100vw - 32px)",
-        zIndex: 60,
-        display: "flex",
-        flexDirection: "column",
-        borderRadius: 12,
-        border: "1px solid rgba(127,127,127,0.28)",
-        background: "rgba(22,24,28,0.97)",
-        color: "#e8eaed",
-        boxShadow: "0 18px 48px rgba(0,0,0,0.45)",
-        font: "13px/1.55 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-        overflow: "hidden"
-      },
-      header: {
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "10px 12px",
-        borderBottom: "1px solid rgba(127,127,127,0.22)"
-      },
+      root: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0, font: "13px/1.55 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" },
+      header: { display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: "1px solid rgba(127,127,127,0.22)", flex: "0 0 auto" },
       title: { fontWeight: 600, fontSize: 13, flex: 1 },
-      iconButton: {
-        border: "1px solid rgba(127,127,127,0.28)",
-        background: "transparent",
-        color: "inherit",
-        borderRadius: 6,
-        padding: "2px 8px",
-        fontSize: 12,
-        cursor: "pointer"
-      },
-      body: { overflowY: "auto", padding: "8px 12px 16px" },
+      iconButton: { border: "1px solid rgba(127,127,127,0.28)", background: "transparent", color: "inherit", borderRadius: 6, padding: "2px 8px", fontSize: 12, cursor: "pointer" },
+      body: { overflowY: "auto", padding: "8px 12px 16px", flex: "1 1 auto", minHeight: 0 },
       project: { marginBottom: 18 },
       projectTitle: { fontWeight: 600, fontSize: 12, opacity: 0.9, marginBottom: 2 },
       folder: { fontSize: 11, opacity: 0.45, marginBottom: 8, wordBreak: "break-all" },
       sectionLabel: { fontSize: 11, opacity: 0.55, margin: "10px 0 4px" },
-      row: {
-        display: "flex",
-        alignItems: "baseline",
-        gap: 8,
-        padding: "3px 0",
-        borderBottom: "1px dashed rgba(127,127,127,0.14)"
-      },
-      tag: {
-        fontSize: 10,
-        padding: "1px 6px",
-        borderRadius: 999,
-        border: "1px solid rgba(127,127,127,0.35)",
-        opacity: 0.8,
-        whiteSpace: "nowrap"
-      },
-      stateTag: { fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "rgba(120,170,255,0.18)", whiteSpace: "nowrap" },
+      row: { display: "flex", alignItems: "baseline", gap: 8, padding: "3px 0", borderBottom: "1px dashed rgba(127,127,127,0.14)" },
+      tag: { fontSize: 10, padding: "1px 6px", borderRadius: 999, border: "1px solid rgba(127,127,127,0.35)", opacity: 0.8, whiteSpace: "nowrap" },
       subject: { flex: 1, wordBreak: "break-word" },
-      note: { fontSize: 11, opacity: 0.5, marginLeft: 2 },
+      note: { fontSize: 11, opacity: 0.5, marginLeft: 2, whiteSpace: "nowrap" },
       empty: { opacity: 0.5, fontSize: 12 },
-      error: { color: "#ff9a9a", fontSize: 12, padding: "6px 0" },
-      footer: { padding: "6px 12px", borderTop: "1px solid rgba(127,127,127,0.22)", fontSize: 11, opacity: 0.55 }
+      error: { color: "#ff9a9a", fontSize: 12, padding: "6px 0" }
     };
 
     const STATUS_LABEL = { pending: "待办", doing: "进行中", blocked: "受阻", done: "已完成" };
 
     // ---------- components ----------
-    function SidebarAction() {
-      const open = React.useSyncExternalStore(store.subscribe, store.getSnapshot);
-      return h(
-        "button",
-        {
-          type: "button",
-          title: "项目看板：讨论串状态 + 任务",
-          onClick: () => store.set(!open),
-          style: { ...S.button, borderColor: open ? "rgba(120,170,255,0.65)" : S.button.borderColor }
-        },
-        h("span", { "aria-hidden": "true" }, "▤"),
-        h("span", null, "看板")
-      );
-    }
-
     function Row(props) {
       return h(
         "div",
@@ -210,17 +120,16 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function Panel(props) {
-      const board = useBoard(true);
+    function BoardTab() {
+      const board = useBoard();
       return h(
         "div",
-        { style: S.overlay, role: "dialog", "aria-label": "项目看板" },
+        { style: S.root },
         h(
           "div",
           { style: S.header },
-          h("span", { style: S.title }, "项目看板"),
-          h("button", { type: "button", style: S.iconButton, onClick: board.refresh, title: "刷新" }, "刷新"),
-          h("button", { type: "button", style: S.iconButton, onClick: props.onClose, title: "关闭" }, "关闭")
+          h("span", { style: S.title }, TAB_TITLE),
+          h("button", { type: "button", style: S.iconButton, onClick: board.refresh, title: "刷新" }, "刷新")
         ),
         h(
           "div",
@@ -230,46 +139,76 @@ window.__ModuleLoader__.load({
           !board.loading && board.error === null && board.projects.length === 0
             ? h("div", { style: S.empty }, "还没有 dsh-threads 项目")
             : board.projects.map((project) => h(ProjectBlock, { key: project.id, project }))
-        ),
-        h("div", { style: S.footer }, "数据来自 POST " + ROUTE + " · 只读")
+        )
       );
     }
 
-    function BoardOverlay() {
-      const open = React.useSyncExternalStore(store.subscribe, store.getSnapshot);
-      if (!open) return null;
-      return h(Panel, { onClose: () => store.set(false) });
+    /** Small button for the session header, next to the thread-list action. */
+    function HeaderAction(props) {
+      return h(
+        "button",
+        {
+          type: "button",
+          title: "打开项目看板",
+          onClick: () => props.openBoard(),
+          style: { border: "1px solid rgba(127,127,127,0.28)", background: "transparent", color: "inherit", borderRadius: 8, padding: "3px 9px", fontSize: 12, cursor: "pointer" }
+        },
+        h("span", { "aria-hidden": "true" }, "▤"),
+        h("span", null, " 项目看板")
+      );
     }
 
     // ---------- plugin ----------
     function apply(ctx) {
-      let slots;
+      const get = (name) => {
+        try {
+          return ctx.get(name);
+        } catch {
+          return undefined;
+        }
+      };
+      const slots = get("slots");
+      const tabs = get("sidebarRightTabs");
+      const sidebarRight = get("sidebarRight");
+      if (!slots) return;
+
+      const openBoard = () => {
+        try {
+          sidebarRight && sidebarRight.openTab ? sidebarRight.openTab(TAB_KIND) : undefined;
+        } catch (error) {
+          try { console.warn("dsh-claude-project-ui: openTab failed", error); } catch {}
+        }
+      };
+
       try {
-        slots = ctx.get("slots");
-      } catch {
-        return;
-      }
-      if (slots === undefined || slots === null) return;
-      try {
-        slots.inject("sidebar.footer.action", () =>
+        if (tabs && typeof tabs.register === "function") {
+          ctx.effect(() =>
+            tabs.register({
+              id: TAB_ID,
+              kind: TAB_KIND,
+              title: () => TAB_TITLE,
+              guide: [
+                { id: "open", order: 72, title: () => TAB_TITLE, description: () => "项目、讨论串与任务的一览" }
+              ]
+            })
+          );
+        }
+        slots.inject("sidebar.right.pane.tab", () =>
+          slots.register({ name: "sidebar.right.pane.tab", key: TAB_ID, inject: () => ({}) }, BoardTab)
+        );
+        slots.inject("conversation.session.header.actions", () =>
           slots.register(
-            { name: "sidebar.footer.action", id: "project-hub", order: 12, label: () => "看板" },
-            SidebarAction
+            { name: "conversation.session.header.actions", id: TAB_ID, order: 16, inject: () => ({ openBoard }) },
+            HeaderAction
           )
         );
-        slots.inject("shell.overlay", () =>
-          slots.register({ name: "shell.overlay", id: "project-hub", order: 12 }, BoardOverlay)
-        );
       } catch (error) {
-        // A missing slot in this host generation must not break the shell.
-        try {
-          console.warn("dsh-claude-project-ui: board panel not mounted:", error);
-        } catch {
-          /* ignore */
-        }
+        try { console.warn("dsh-claude-project-ui: board tab not mounted:", error); } catch {}
       }
     }
 
-    return { name: "dsh-claude-project-ui", inject: ["slots"], apply };
+    // Same Cordis rule as on the host side: a service can only be read through
+    // `ctx.get` / `ctx.<name>` when it is declared here.
+    return { name: "dsh-claude-project-ui", inject: ["slots", "sidebarRightTabs", "sidebarRight"], apply };
   }
 });

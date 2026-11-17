@@ -101,7 +101,7 @@
 
 ## 看板面板（侧栏）
 
-浏览器半会往**左栏页脚**（侧栏底部）加一个「▤ 看板」按钮，点开是右侧浮层面板：
+浏览器半会往**右侧栏**加一个「项目看板」页签，和 dsh-threads 的「讨论串」并列（会话头部还有一个「▤ 项目看板」按钮可以一键打开）：
 
 - 按项目分组，列出**进行中的讨论串**（编号、标题、状态、worktree 分支）
 - 列出**任务**（编号、标题、状态、负责人），含自动汇总的讨论串任务
@@ -328,7 +328,7 @@ and they run in order with a per-line report. A trailing `→ note` is treated a
 
 ## Board panel (sidebar)
 
-The browser half adds a "▤ 看板" button to the **left rail footer**. It opens an overlay on the
+The browser half registers a "项目看板" tab in the **right-hand sidebar pane**, next to dsh-threads' "讨论串" tab (the session header also gets a "▤ 项目看板" button that opens it):
 right:
 
 - Projects grouped, each listing **live threads** (number, title, state, worktree branch)
