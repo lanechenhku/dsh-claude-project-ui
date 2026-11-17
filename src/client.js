@@ -145,6 +145,20 @@ window.__ModuleLoader__.load({
       );
     }
 
+    /**
+     * Tab title seat. Registering this slot replaces the host's default title
+     * rendering (a generic cube icon plus the label) with our own markup, so the
+     * tab shows the plugin's own ▤ glyph at the host's text size.
+     */
+    function TabTitle() {
+      return h(
+        "span",
+        { style: { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, lineHeight: 1.2 } },
+        h("span", { "aria-hidden": "true", style: { fontSize: 12 } }, TAB_ICON),
+        h("span", null, TAB_TITLE)
+      );
+    }
+
     /** Small button for the session header, next to the thread-list action. */
     function HeaderAction(props) {
       return h(
@@ -188,15 +202,18 @@ window.__ModuleLoader__.load({
             tabs.register({
               id: TAB_ID,
               kind: TAB_KIND,
-              title: () => TAB_LABEL,
+              title: () => TAB_TITLE,
               guide: [
-                { id: "open", order: 72, title: () => TAB_LABEL, description: () => "项目、讨论串与任务的一览" }
+                { id: "open", order: 72, title: () => TAB_TITLE, description: () => "项目、讨论串与任务的一览" }
               ]
             })
           );
         }
         slots.inject("sidebar.right.pane.tab", () =>
           slots.register({ name: "sidebar.right.pane.tab", key: TAB_ID, inject: () => ({}) }, BoardTab)
+        );
+        slots.inject("sidebar.right.pane.tab.title", () =>
+          slots.register({ name: "sidebar.right.pane.tab.title", key: TAB_ID, inject: () => ({}) }, TabTitle)
         );
         slots.inject("conversation.session.header.actions", () =>
           slots.register(
