@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0
+
+- 新增**看板面板**（浏览器半）：侧栏页脚多一个「▤ 看板」按钮，点开是右侧浮层面板，
+  按项目列出进行中的讨论串和全部任务，支持手动刷新。数据来自宿主半新注册的
+  `POST /project-hub/board`（只读 JSON）。
+- 客户端半按 DSH 的 `window.__ModuleLoader__` 约定手写，不依赖构建步骤；
+  `package.json` 增加 `exports["./client"]` 与 `dsh.client`。
+- 面板在没有 `webServer` 的 profile（tui / headless）里自动退化：宿主不注册路由，
+  客户端不加载，`/hub board` 与 `board_list` 照常可用。
+
+
 ## 0.1.3
 
 - 修复：进展摘要读的是 `report.files`，而 dsh-threads 实际写 `lastReport.changedFiles`——

@@ -59,6 +59,17 @@
 一次粘多行也可以：每条以 `/hub` 开头（或只是首行带 `/hub`），逐行执行、逐条汇报。
 行尾的 `→ 说明` 会被当作注释丢掉。
 
+## 看板面板（侧栏）
+
+浏览器半会往侧栏页脚加一个「▤ 看板」按钮，点开是右侧浮层面板：
+
+- 按项目分组，列出**进行中的讨论串**（编号、标题、状态、worktree 分支）
+- 列出**任务**（编号、标题、状态、负责人），含自动汇总的讨论串任务
+- 默认隐藏已解决/已归档的讨论串，只提示「另有 N 个」
+- 「刷新」按钮重新拉取；数据来自宿主半的 `POST /project-hub/board`，**只读**
+
+面板只在 Web GUI（`desktop` / `web` profile）出现；`tui` / headless 没有侧栏，
+退化成 `/hub board` 命令和 `board_list` 工具。
 ## 安装
 
 需要 DeepSeek Harness 0.2.1-rc.2 到 0.3.0。
@@ -77,12 +88,12 @@
 ```sh
 # 解到 profile 的 node_modules
 mkdir -p ~/.dsh/profiles/desktop/node_modules/dsh-project-hub
-tar xzf dsh-project-hub-0.1.3.tgz -C /tmp/pkg
+tar xzf dsh-project-hub-0.2.0.tgz -C /tmp/pkg
 cp -R /tmp/pkg/package/. ~/.dsh/profiles/desktop/node_modules/dsh-project-hub/
 ```
 
 然后编辑 `~/.dsh/profiles/desktop/package.json`：`dependencies` 里加
-`"dsh-project-hub": "^0.1.3"`，`dsh.profile.bundles` 数组里追加 `"dsh-project-hub"`，
+`"dsh-project-hub": "^0.2.0"`，`dsh.profile.bundles` 数组里追加 `"dsh-project-hub"`，
 最后完全退出 DSH（⌘Q）再启动。
 
 > 只加依赖、不加 `dsh.profile.bundles` 不会加载——DSH 只从 bundles 层挂载插件。
@@ -142,7 +153,7 @@ dsh plugin --profile web add dsh-project-hub
 - 知识库是**词法检索**（CJK 二元组 + 英文词 + 词频归一化），没有向量检索，也没有 LLM 摘要；文档要自己写清楚标题和关键词。
 - 摘要不是模型生成的：自动部分来自 dsh-threads 的 `lastReport`，手动部分来自 `hub_note`。主对话自己没回报过的东西不会出现。
 - 注入内容按字符截断（每段默认 700-900 字），不是按 token 精确计量。
-- 没有客户端 UI：看板走 `board_list` 工具和 `/hub board` 命令，不做侧栏面板。
+- 面板是只读的：建/改/删任务目前只能用 `board_add` / `board_update` / `/hub task|done|rm`。
 - 轮询刷新：每 10 秒 + agent 状态变化时刷新提示词快照，最坏情况看到的是 10 秒前的看板。
 - 看板默认隐藏已解决/已归档的讨论串；想全看用 `board_list all=true` 或 `/hub board --all`。
 

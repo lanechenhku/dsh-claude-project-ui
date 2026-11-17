@@ -62,6 +62,79 @@ export async function apply(ctx, config) {
     }
   };
 
+  // ---- browser half: read-only JSON the board panel fetches ----
+  // Registered on the web server when this profile has one (the web GUI does).
+  // Optional on purpose: headless / tui profiles load this plugin too.
+  const BOARD_ROUTE = "/project-hub/board";
+  const readBody = (req) =>
+    new Promise((resolve, reject) => {
+      let size = 0;
+      const chunks = [];
+      req.on("data", (chunk) => {
+        size += chunk.length;
+        if (size > 1_000_000) {
+          reject(new Error("body too large"));
+          req.destroy();
+          return;
+        }
+        chunks.push(chunk);
+      });
+      req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+      req.on("error", reject);
+    });
+
+  const boardSnapshot = async () => {
+    const projects = await registry.projects();
+    const out = [];
+    for (const project of projects) {
+      const threads = await registry.threadsOf(project.id);
+      const board = await loadBoard(store, project.id);
+      const view = boardView(project, threads, board);
+      out.push({
+        id: project.id,
+        title: project.title,
+        folder: project.folder,
+        hidden: view.hidden,
+        threads: view.threads.map((thread) => ({
+          n: thread.n,
+          title: thread.title,
+          state: thread.state,
+          branch: thread.branch
+        })),
+        tasks: view.tasks
+      });
+    }
+    return out;
+  };
+
+  try {
+    const webServer =
+      (typeof ctx.get === "function" ? ctx.get("webServer") : undefined) ?? ctx.webServer;
+    if (webServer !== undefined && webServer !== null && typeof webServer.register === "function") {
+      const off = webServer.register({
+        kind: "exact",
+        path: BOARD_ROUTE,
+        handler: async (req, res) => {
+          try {
+            if (req.method !== "GET") await readBody(req);
+            const projects = await boardSnapshot();
+            res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: true, projects }));
+          } catch (error) {
+            res.writeHead(500, { "content-type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: String(error?.message ?? error) }));
+          }
+        }
+      });
+      if (typeof off === "function") ctx.effect?.(() => off, "dsh-project-hub: board route");
+      info("board panel route at " + BOARD_ROUTE);
+    }
+  } catch (error) {
+    warn("cannot register the board route: " + String(error));
+  }
+
+
+
   /** sessionId -> { kb, board, digest } prompt text, read synchronously by the host. */
   const textCache = new Map();
   /** agent -> disposer for its sections and tools. */
