@@ -13,6 +13,15 @@
   ],
   "type": "module",
   "license": "MIT",
+  "author": "Lane Chen <lanechenhku@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lanechenhku/dsh-project-hub.git"
+  },
+  "homepage": "https://github.com/lanechenhku/dsh-project-hub#readme",
+  "bugs": {
+    "url": "https://github.com/lanechenhku/dsh-project-hub/issues"
+  },
   "main": "./src/index.js",
   "exports": {
     ".": "./src/index.js",
@@ -37,6 +46,5 @@
   },
   "scripts": {
     "test": "node test/harness.mjs"
-  },
-  "author": "Lane Chen <lanechenhku@gmail.com>"
+  }
 }
