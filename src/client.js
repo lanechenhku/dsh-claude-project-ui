@@ -12,7 +12,9 @@ window.__ModuleLoader__.load({
     const ROUTE = "/project-hub/board";
     const TAB_ID = "project-hub";
     const TAB_KIND = "project-hub";
+    const TAB_ICON = "▤";
     const TAB_TITLE = "项目看板";
+    const TAB_LABEL = TAB_ICON + " " + TAB_TITLE;
 
     // ---------- data ----------
     const cache = { at: 0, data: null, pending: null };
@@ -128,7 +130,7 @@ window.__ModuleLoader__.load({
         h(
           "div",
           { style: S.header },
-          h("span", { style: S.title }, TAB_TITLE),
+          h("span", { style: S.title }, TAB_LABEL),
           h("button", { type: "button", style: S.iconButton, onClick: board.refresh, title: "刷新" }, "刷新")
         ),
         h(
@@ -153,8 +155,8 @@ window.__ModuleLoader__.load({
           onClick: () => props.openBoard(),
           style: { border: "1px solid rgba(127,127,127,0.28)", background: "transparent", color: "inherit", borderRadius: 8, padding: "3px 9px", fontSize: 12, cursor: "pointer" }
         },
-        h("span", { "aria-hidden": "true" }, "▤"),
-        h("span", null, " 项目看板")
+        h("span", { "aria-hidden": "true" }, TAB_ICON),
+        h("span", null, " " + TAB_TITLE)
       );
     }
 
@@ -186,9 +188,9 @@ window.__ModuleLoader__.load({
             tabs.register({
               id: TAB_ID,
               kind: TAB_KIND,
-              title: () => TAB_TITLE,
+              title: () => TAB_LABEL,
               guide: [
-                { id: "open", order: 72, title: () => TAB_TITLE, description: () => "项目、讨论串与任务的一览" }
+                { id: "open", order: 72, title: () => TAB_LABEL, description: () => "项目、讨论串与任务的一览" }
               ]
             })
           );
