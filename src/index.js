@@ -1,3 +1,6 @@
+import { appendFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { resolveConfig } from "./config.js";
 import { defaultThreadsStorage, ProjectRegistry } from "./project.js";
 import { ProjectStore } from "./store.js";
@@ -41,7 +44,23 @@ try {
 
 const REFRESH_MS = 10000;
 
+// Startup breadcrumbs: DSH swallows plugin load errors, so write them to a file
+// we can read after a restart instead of guessing why the plugin did not mount.
+const LOAD_LOG = join(homedir(), ".dsh", "project-hub", "_load.log");
+
+function breadcrumb(message) {
+  try {
+    mkdirSync(dirname(LOAD_LOG), { recursive: true });
+    appendFileSync(LOAD_LOG, new Date().toISOString() + " " + message + "\n");
+  } catch {
+    // diagnostics must never break the plugin
+  }
+}
+
+breadcrumb("module imported");
+
 export async function apply(ctx, config) {
+  breadcrumb("apply start");
   const resolved = resolveConfig(config);
   const registry = new ProjectRegistry(resolved.threadsStorage.trim().length > 0 ? resolved.threadsStorage : defaultThreadsStorage());
   const store = new ProjectStore(resolved);
@@ -126,11 +145,15 @@ export async function apply(ctx, config) {
           }
         }
       });
-      if (typeof off === "function") ctx.effect?.(() => off, "dsh-project-hub: board route");
+      if (typeof off === "function") ctx.effect?.(() => off, "dsh-claude-project-ui: board route");
       info("board panel route at " + BOARD_ROUTE);
+      breadcrumb("route registered at " + BOARD_ROUTE);
+    } else {
+      breadcrumb("no webServer on ctx (get=" + typeof ctx.get + ", prop=" + typeof ctx.webServer + ")");
     }
   } catch (error) {
     warn("cannot register the board route: " + String(error));
+    breadcrumb("route failed: " + String(error));
   }
 
 
@@ -313,6 +336,7 @@ export async function apply(ctx, config) {
   }
 
   info("ready; data in " + store.root);
+  breadcrumb("apply done");
 }
 
 export { createTools };
