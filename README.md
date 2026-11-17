@@ -96,18 +96,18 @@
 
 两条可用路径：
 
-1. **设置 → 插件 → 市场**，搜索 `dsh-project-hub` 安装，然后重启。
+1. **设置 → 插件 → 市场**，搜索 `dsh-claude-project-ui` 安装，然后重启。
 2. **手工安装**（离线或私发 tarball 时）：
 
 ```sh
 # 解到 profile 的 node_modules
-mkdir -p ~/.dsh/profiles/desktop/node_modules/dsh-project-hub
-tar xzf dsh-project-hub-0.2.0.tgz -C /tmp/pkg
-cp -R /tmp/pkg/package/. ~/.dsh/profiles/desktop/node_modules/dsh-project-hub/
+mkdir -p ~/.dsh/profiles/desktop/node_modules/dsh-claude-project-ui
+tar xzf dsh-claude-project-ui-0.2.0.tgz -C /tmp/pkg
+cp -R /tmp/pkg/package/. ~/.dsh/profiles/desktop/node_modules/dsh-claude-project-ui/
 ```
 
 然后编辑 `~/.dsh/profiles/desktop/package.json`：`dependencies` 里加
-`"dsh-project-hub": "^0.2.0"`，`dsh.profile.bundles` 数组里追加 `"dsh-project-hub"`，
+`"dsh-claude-project-ui": "^0.2.0"`，`dsh.profile.bundles` 数组里追加 `"dsh-claude-project-ui"`，
 最后完全退出 DSH（⌘Q）再启动。
 
 > 只加依赖、不加 `dsh.profile.bundles` 不会加载——DSH 只从 bundles 层挂载插件。
@@ -117,14 +117,14 @@ cp -R /tmp/pkg/package/. ~/.dsh/profiles/desktop/node_modules/dsh-project-hub/
 这些 profile 由 CLI 启动，可以正常用插件管理器：
 
 ```sh
-dsh plugin --profile web add dsh-project-hub
+dsh plugin --profile web add dsh-claude-project-ui
 ```
 
 ### 卸载
 
 桌面 App：从 `dependencies` 和 `dsh.profile.bundles` 里删掉，再删
-`~/.dsh/profiles/desktop/node_modules/dsh-project-hub`，重启。
-其他 profile：`dsh plugin --profile web remove dsh-project-hub`。
+`~/.dsh/profiles/desktop/node_modules/dsh-claude-project-ui`，重启。
+其他 profile：`dsh plugin --profile web remove dsh-claude-project-ui`。
 
 数据留在 `~/.dsh/project-hub/`，卸载不会删；要彻底清掉就删这个目录。
 
@@ -133,8 +133,8 @@ dsh plugin --profile web add dsh-project-hub
 在 profile 的 `cordis.patch.yml` 里覆盖：
 
 ```yaml
-- id: dsh-project-hub
-  name: "dsh-project-hub"
+- id: dsh-claude-project-ui
+  name: "dsh-claude-project-ui"
   config:
     dataDir: ""                      # 默认 ~/.dsh/project-hub
     threadsStorage: ""               # 默认 ~/.dsh/storages/dsh_threads.json
