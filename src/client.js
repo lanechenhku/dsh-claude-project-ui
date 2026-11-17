@@ -146,6 +146,15 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Picker icon. The right-pane "open a tab" list draws a provider icon per
+     * entry (a generic cube when none is given); returning our own component
+     * keeps the plugin's ▤ glyph instead of the host default.
+     */
+    function TabIcon() {
+      return h("span", { "aria-hidden": "true", style: { fontSize: 15, lineHeight: 1 } }, TAB_ICON);
+    }
+
+    /**
      * Tab title seat. Registering this slot replaces the host's default title
      * rendering (a generic cube icon plus the label) with our own markup, so the
      * tab shows the plugin's own ▤ glyph at the host's text size.
@@ -204,7 +213,13 @@ window.__ModuleLoader__.load({
               kind: TAB_KIND,
               title: () => TAB_TITLE,
               guide: [
-                { id: "open", order: 72, title: () => TAB_TITLE, description: () => "项目、讨论串与任务的一览" }
+                {
+                  id: "open",
+                  order: 72,
+                  title: () => TAB_TITLE,
+                  description: () => "项目、讨论串与任务的一览",
+                  icon: TabIcon
+                }
               ]
             })
           );
