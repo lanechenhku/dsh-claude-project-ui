@@ -8,7 +8,7 @@ DSH 桌面版正在运行时，`dsh plugin --profile desktop add` 会被拒绝
 
 1. `~/.dsh/profiles/desktop/node_modules/dsh-claude-project-ui` → 指到本目录的符号链接
 2. `~/.dsh/profiles/desktop/package.json`
-   - `dependencies["dsh-claude-project-ui"] = "link:/Users/lanechen/Documents/deepseek-harness/default-workspace/dsh-claude-project-ui"`
+   - `dependencies["dsh-claude-project-ui"] = "link:<path-to-this-repo>"`
    - `dsh.profile.bundles` 末尾追加 `dsh-claude-project-ui`
 3. 插件靠自己的 `cordis.patch.yml` 插入 loader 行（`id: dsh-claude-project-ui`）
 
@@ -38,7 +38,7 @@ DSH 桌面版正在运行时，`dsh plugin --profile desktop add` 会被拒绝
 ```sh
 rm ~/.dsh/profiles/desktop/node_modules/dsh-claude-project-ui
 # 从备份恢复 manifest（安装前的版本）
-cp ~/.dsh/backup-project-hub-20261118-010512/package.json ~/.dsh/profiles/desktop/package.json
+cp ~/.dsh/backup-project-hub-<timestamp>/package.json ~/.dsh/profiles/desktop/package.json
 ```
 
 ## 以后改用正式安装
@@ -48,7 +48,7 @@ cp ~/.dsh/backup-project-hub-20261118-010512/package.json ~/.dsh/profiles/deskto
 ```sh
 rm ~/.dsh/profiles/desktop/node_modules/dsh-claude-project-ui
 # 先按上面「回滚」恢复 manifest，再：
-dsh plugin --profile desktop add ./dsh-claude-project-ui/dist/dsh-claude-project-ui-0.1.0.tgz
+dsh plugin --profile desktop add ./dsh-claude-project-ui/dist/dsh-claude-project-ui-0.2.0.tgz
 ```
 
 装完确认 `dsh.profile.bundles` 仍有 `dsh-claude-project-ui`（`dsh plugin add` 不负责 bundles 列表）。

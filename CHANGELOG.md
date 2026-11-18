@@ -1,6 +1,14 @@
 # Changelog
 
-## 0.2.0
+## Unreleased
+
+- 文档：README 补「快速开始（3 步）」「配置项表」「License」三节（中英各一份）；修两处 heading 前缺空行、
+  英文看板段的一句残句（多余的一行 `right:`）。
+- `package.json` 加 `prepublishOnly` 门禁：`node test/harness.mjs && node test/spec-check.mjs`，
+  以后 `npm publish` 前必过测试与 schema 校验。
+- `INSTALL-LOCAL.md` 的个人绝对路径换成占位符。
+
+## 0.2.0 — 2026-11-17（npm 首发）
 
 - 改名：`dsh-project-hub` → `dsh-claude-project-ui`（仓库、npm 包名、插件 id 一并改；仓库改名后旧地址仍重定向）。
 - 新增**看板面板**（浏览器半）：侧栏页脚多一个「▤ 看板」按钮，点开是右侧浮层面板，

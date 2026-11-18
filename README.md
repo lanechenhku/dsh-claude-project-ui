@@ -34,6 +34,7 @@
 ```
 
 改完完全退出 DSH 再启动。
+
 ## 和 dsh-threads 的关系：补强，不是替代
 
 | 能力 | `@kyf-eng/dsh-threads` | 本插件 `dsh-claude-project-ui` |
@@ -110,6 +111,7 @@
 
 面板只在 Web GUI（`desktop` / `web` profile）出现；`tui` / headless 没有侧栏，
 退化成 `/hub board` 命令和 `board_list` 工具。
+
 ## 安装
 
 需要 DeepSeek Harness 0.2.1-rc.2 到 0.3.0。
@@ -154,6 +156,20 @@ dsh plugin --profile web add dsh-claude-project-ui
 
 数据留在 `~/.dsh/project-hub/`，卸载不会删；要彻底清掉就删这个目录。
 
+## 快速开始（3 步）
+
+装好并**完全退出 DSH 再启动**之后：
+
+```text
+/hub status        我在哪个项目、多少知识 / 任务
+/hub note 发布前必须跑 node test/harness.mjs
+/hub add 发布清单 | 1) 跑测试 2) npm pack 3) gh release
+/hub brief         粘进 thread_open.task 的项目简报
+```
+
+右侧栏「▤ 项目看板」页签里应该能看到刚加的任务和讨论串状态；`tui` / headless 没有侧栏，用 `/hub board`。
+开新讨论串时它第一步就会带上项目说明、看板快照和最近进展，不用你复制粘贴。
+
 ## 配置
 
 在 profile 的 `cordis.patch.yml` 里覆盖：
@@ -175,6 +191,21 @@ dsh plugin --profile web add dsh-claude-project-ui
     hideResolvedThreads: true        # 看板与注入里隐藏已解决/已归档的讨论串
     autoConvergeReports: true        # 把讨论串回报自动汇总成看板任务（幂等）
 ```
+
+| 字段 | 默认值 | 影响 |
+|---|---|---|
+| `dataDir` | `~/.dsh/project-hub` | 知识库 / 任务 / 笔记的根目录；换掉就是另一套项目数据 |
+| `threadsStorage` | `~/.dsh/storages/dsh_threads.json` | 只读；用来识别「哪些会话属于哪个项目」，格式变了会静默降级为不注入 |
+| `knowledgeIndexMaxChars` | `280` | 注入的知识库索引字符上限；调大占提示词预算，调小了只列更少文档 |
+| `kbIndexMaxDocs` | `3` | 索引里最多列几篇文档，其余提示用 `kb_search` 检索 |
+| `boardContextMaxChars` | `700` | 注入的看板快照字符上限 |
+| `digestContextMaxChars` | `700` | 注入的「最近进展」字符上限 |
+| `briefMaxChars` | `4000` | `context_brief` / `/hub brief` 的单次输出上限 |
+| `maxNotes` | `200` | 每个项目保留多少条 `hub_note` 进展笔记 |
+| `maxDocs` | `200` | 每个项目允许的知识库文档数 |
+| `maxKnowledgeChars` | `4000000` | 每个项目知识库总字符数上限 |
+| `hideResolvedThreads` | `true` | 看板与注入里隐藏已解决 / 已归档讨论串；`board_list all=true` 可看全部 |
+| `autoConvergeReports` | `true` | 讨论串回报自动汇总成看板任务（按 `threadId` 幂等） |
 
 ## 数据
 
@@ -211,6 +242,10 @@ dsh plugin --profile web add dsh-claude-project-ui
 ## 与 Team 模式的关系
 
 Team 模式的任务板属于**单个会话的 subagent 树**；本插件的看板属于**一个 dsh-threads 项目**（主对话 + 它的所有讨论串）。两者互补，不会互相写入。
+
+## License
+
+MIT（见 [LICENSE](LICENSE)）。
 
 ---
 
@@ -329,7 +364,6 @@ and they run in order with a per-line report. A trailing `→ note` is treated a
 ## Board panel (sidebar)
 
 The browser half registers a "项目看板" tab in the **right-hand sidebar pane**, next to dsh-threads' "讨论串" tab (the session header also gets a "▤ 项目看板" button that opens it):
-right:
 
 - Projects grouped, each listing **live threads** (number, title, state, worktree branch)
 - **Tasks** (id, title, status, owner), including the automatically rolled-up thread tasks
@@ -384,6 +418,21 @@ Other profiles: `dsh plugin --profile web remove dsh-claude-project-ui`.
 
 Data stays in `~/.dsh/project-hub/`; uninstalling does not delete it.
 
+## Quick start (3 steps)
+
+After installing and **quitting DSH completely and starting it again**:
+
+```text
+/hub status        which project am I in, how much knowledge / how many tasks
+/hub note release gate is node test/harness.mjs
+/hub add release checklist | 1) run tests 2) npm pack 3) gh release
+/hub brief         a project brief to paste into thread_open.task
+```
+
+The "▤ 项目看板" tab in the right pane should now show the task and thread state you just added; `tui` / headless
+have no sidebar, so use `/hub board` there. When you open a new thread it starts with the project brief, the board
+snapshot and recent progress already attached.
+
 ## Configuration
 
 Override in the profile's `cordis.patch.yml`:
@@ -405,6 +454,21 @@ Override in the profile's `cordis.patch.yml`:
     hideResolvedThreads: true        # hide resolved/archived threads in the board and injection
     autoConvergeReports: true        # roll thread reports up into board tasks (idempotent)
 ```
+
+| Field | Default | Effect |
+|---|---|---|
+| `dataDir` | `~/.dsh/project-hub` | Root for knowledge, tasks and notes; pointing it elsewhere gives you a separate set of projects |
+| `threadsStorage` | `~/.dsh/storages/dsh_threads.json` | Read-only; used to tell which sessions belong to a project. A format change degrades to "no injection" |
+| `knowledgeIndexMaxChars` | `280` | Character cap for the injected knowledge index |
+| `kbIndexMaxDocs` | `3` | How many documents the index lists before pointing at `kb_search` |
+| `boardContextMaxChars` | `700` | Character cap for the injected board snapshot |
+| `digestContextMaxChars` | `700` | Character cap for the injected recent-progress digest |
+| `briefMaxChars` | `4000` | Cap for one `context_brief` / `/hub brief` result |
+| `maxNotes` | `200` | Progress notes kept per project |
+| `maxDocs` | `200` | Knowledge documents allowed per project |
+| `maxKnowledgeChars` | `4000000` | Total knowledge characters allowed per project |
+| `hideResolvedThreads` | `true` | Hide resolved / archived threads from the board and injection; `board_list all=true` shows everything |
+| `autoConvergeReports` | `true` | Mirror thread reports onto the board as tasks (idempotent by `threadId`) |
 
 ## Data
 
@@ -449,3 +513,7 @@ Plain JSON, written atomically (temp file + rename); safe to back up or edit by 
 A Team-mode task board belongs to **one session's subagent tree**; this plugin's board belongs to
 **one dsh-threads project** (main conversation plus all of its threads). They complement each other
 and never write to the same place.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
