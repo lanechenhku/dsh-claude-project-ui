@@ -1,5 +1,100 @@
 # Changelog
 
+## 0.4.1 — 2026-11-18
+
+**弹窗真的在最上层 + 弹窗信息结构重做**（0.4.0 的真机反馈）。仍是 0.4.x，只改浏览器半的弹窗与文案。
+
+- **置顶问题（修复根因）**：0.4.0 的弹窗只写了 `position: fixed; z-index: 9999`，但父级若有
+  `transform` / `filter` / `contain` / `isolation` 就会形成新的层叠上下文，9999 只在该上下文内部有效，
+  所以会被面板或 dsh-threads 自己的 Modal 压住。现在弹窗通过 **React portal** 挂到
+  `document.body` 下的专用容器 `#project-hub-dialog-root`（`role="dialog"` / `aria-modal="true"` /
+  `aria-labelledby` 指向标题），彻底离开宿主的层叠上下文。找不到 `react-dom` 或没有 `document` 时
+  退回原地渲染（不会消失）。打开时锁 `body` 滚动、恢复原值；**Esc** 关闭、**点遮罩**关闭。
+- **弹窗信息结构（照着用户给的结构重做）**：
+  - 头部：项目名（粗体）→ 浅色小字「当前主文件夹」→ 路径（monospace、单行省略、hover 显示全路径）；
+    右上 `✕`。
+  - 主文件夹行：`[更换…]` 主按钮 + 小链接「手动输入路径」（点了才出现输入框，不再常驻第二个按钮）。
+  - 分隔线。
+  - 辅助文件夹：标题 + 数量徽标；为空只有一行浅灰提示；非空每行 = 文件夹图标（内联 SVG）+ 路径
+    （mono、省略）+ 右侧 `[移除]`；下面是输入框 + `[添加]`（placeholder 保持「绝对路径，或 ~/开头」）。
+  - 底部**一行**浅灰脚注（沙箱可写根 + 写入 dsh-threads 记录 + 其面板重启后同步）。
+  - 成功反馈：受影响那一行右侧出现 2 秒「已保存」（`role="status"`），不再有 toast / alert / 大段说明。
+  - 说明文字从两大段砍到一行脚注，其余解释性长句移到 README。
+- **弹窗读实时数据**：弹窗内的项目/工作区对象改为从看板快照里按 id 取最新一份，
+  增删辅助文件夹后列表立即更新（不再需要关掉再打开）。
+- **双语**：新增/改写的弹窗文案 zh/en 同时补齐（两张表各 79 个 key）；
+  面板除订阅 `locale/change` 事件外，**同时订阅 locale 服务的快照**，语言一换就重渲染 ——
+  不是挂载时读一次 `<html lang>`。测试新增四条：locale 服务切换后语言与文案跟着变、
+  文案表与调用点一致（没有未用 key、也没有用到不存在的 key）、弹窗容器只创建一次且角色正确、
+  三个入口都只走同一个弹窗。
+- **文档**：新增 [`docs/dialog-redesign-0.4.1.md`](docs/dialog-redesign-0.4.1.md)（新旧结构对比 + 只能真机验的项）；
+  README 补「文件夹弹窗」与「如何切语言」两节。
+- **看板设置入口（⚙，并入 0.4.1）**：面板头部「刷新」左边新增 ⚙，用**同一套 portal** 打开 360 宽的紧凑
+  设置面板（不是全屏弹窗）。六项：语言（跟随应用（中文）/ 中文 / English，手动选择优先于应用语言）、
+  显示已解决 / 已归档的讨论串（默认关）、自动把讨论串回报汇总成任务（默认开）、「其他项目」卡片默认
+  折叠 / 展开、排序（最近活动 / 名称）、项目文件夹管理…。
+  - **存储**：新增 `src/settings.js` + `ProjectStore` 的全局读写，存 `<dataDir>/settings.json`
+    （默认 `~/.dsh/project-hub/settings.json`），**不写 dsh-threads 的存储**；越界值夹回默认，写入串行化。
+  - **立刻生效**：客户端 store 改完立刻重渲染 + 写入；宿主半下次快照用新值。其中「隐藏讨论串」与
+    「回报汇总」是**宿主侧**行为（快照过滤 + sweep），两条路径读同一份设置，不是前端假装。
+  - **语言优先级**：手动 `zh`/`en` > locale 服务 > `<html lang>`/navigator > `en`；
+    「跟随应用（中文）」括号里显示当前应用语言。
+  - **管理页链接**：DSH 没有公开「打开设置页某个分节」的客户端 API（核实 `dsh-client-ui-settings-general`：
+    shell store 是槽位内部状态，未导出服务），所以它在同一面板里渲染**同一个** `SettingsSection`
+    组件（宽 460），不假装跳转。
+  - **配置项定位变化**：`hideResolvedThreads` / `autoConvergeReports` 现在是**初始默认值**，一旦在 ⚙ 里改过就以
+    设置文件为准。
+  - 新增测试 5 条（语言覆盖优先级、客户端设置归一化、宿主设置往返与夹取、隐藏讨论串确实是宿主侧过滤、
+    同一时间只开一个浮层且写入失败会回滚），`npm test` 共 52 条。
+
+## 0.4.0 — 2026-11-18
+
+**看板版式重做 + 真正的双语 + 文件夹的三个入口**。看板从「一堆项目平铺」变成两层结构；
+面板/弹窗/设置页的文案全部抽成 zh/en 两套并跟随 DSH 的 locale 服务；改文件夹新增看板、设置页、
+dsh-threads 面板三处入口，共用一套组件与一条写入路径。
+
+- **看板版式（浏览器半，`src/client.js`）**：
+  - 当前项目置顶：独立卡片 + 左侧 3px 强调色竖条 + 名称 + monospace 11 路径；右上「切换文件夹⋯」+
+    展开箭头；卡片内是「辅助文件夹」折叠区。
+    「当前项目」由宿主半解析：面板把所在对话的 session id 发到 `POST /project-hub/board`，
+    宿主用 `registry.roleOf(sessionId)` 找到项目并回填 `currentProjectId`；解析不出来就不置顶。
+  - 当前卡片与其余项目之间是一条 2px 粗分隔 + 文字「其他项目 · N」（`Other projects · N`），
+    **滚动吸顶**（`position: sticky`）。
+  - 其余项目按**最近活动时间**倒序（宿主在快照里给每个项目算 `activity` = 项目记录与所有讨论串里最新的那个），
+    紧凑卡片（名称 + 讨论串/任务数量 + 最近活动）默认收起，点开才展开讨论串与任务行；
+    卡片之间 1px 细线 + 12px 间距。
+  - 讨论串行 = 6px 状态点 + `#编号` + 单行省略标题 + 右侧状态词；任务行 = 状态 pill + 任务号 + 主题 +
+    右侧「+」复制任务号（配合 `/hub done <id>`）。空状态只有一行浅色提示。
+  - 视觉规范：8px 网格、圆角 10、边框 `rgba(127,127,127,0.18)`、hover `rgba(127,127,127,0.06)`、
+    无大阴影、字号 12/13、monospace 11；状态点颜色 进行中=蓝、待办=灰、受阻/待决策=橙、
+    已完成/已解决=绿、空闲/已停止=浅灰。
+  - 讨论串状态改用**稳定 code**（`threadStateCode()` 新增在 `src/project.js`），
+    `boardView()` 额外返回 `code`，面板据此翻译（不再把中文状态词直接显示在英文界面里）。
+- **双语**：`src/client.js` 里 `MESSAGES.zh` / `MESSAGES.en` 各 93 个 key，覆盖面板、弹窗、设置页、
+  注入按钮的**全部**文案。语言读 DSH 的 locale 服务（`ctx.locale.getLocale()` + `ctx.on("locale/change")`，
+  并用 `ctx.locale.register("project-hub", { zh, en })` 登记字典）；切换语言立即生效。
+  **缺 key 回退顺序：当前语言 → 英文 → 中文 → key**。客户端 `inject` 因此新增 `locale`。
+- **入口 A（看板内）**：当前项目卡片的「切换文件夹⋯」打开共用弹窗；卡片内的「辅助文件夹」折叠区可以增删挂载。
+- **入口 B（设置页）**：`slots.inject("settings.section")` 注册「项目文件夹 / Project folders」分节，
+  列出**所有项目与工作区**，逐行显示路径 + 修改按钮 + 辅助文件夹数量；**只做逐个修改，没有批量改全部**。
+  已被项目占用的工作区不能单独改（会被拒绝并提示去项目那一行改）。
+  新增 `src/workspaces.js`（工作区只读视图 + 与项目的 join）与 `src/mainfolder.js` 的
+  `setWorkspaceFolder()`（复用同一条备份 / realpath / 串行 / 回滚纪律，只动 `workspace.json`）；
+  `POST /project-hub/folders` 新增 `action: "workspace"`。
+- **入口 C（注入 dsh-threads 面板）**：`MutationObserver` 找 dsh-threads「项目设置 → 通用 → 文件夹」
+  卡片里的 `.dsht-setting-path` 锚点，注入「⚙ 更多文件夹⋯」按钮，点击打开同一个弹窗（按路径认领项目）。
+  找不到锚点静默不注入；重复触发幂等（一个卡片只有一个按钮）；所有 DOM 操作 `try/catch`，
+  结构变化最多掉按钮，不抛到宿主、不白屏。
+- **共用弹窗**：`shell.overlay` 里挂一个 `FolderDialog`，A/B/C 三处都打开它（Esc / 点遮罩关闭）；
+  文件夹表单与看板内嵌的是**同一个组件**（`FolderForm`）。三处都写明
+  「改动会写入 dsh-threads 的项目记录与 workspace 记录；dsh-threads 自己的设置面板要重启后才同步显示」。
+- **宿主半**：`boardSnapshot()` 接受 `sessionId` 并额外返回 `currentProjectId`、`workspaces`、
+  每个项目的 `activity` 与 `workspaceId`；`project.js` 透出 `workspaceId` 并新增 `projectActivity()`。
+- **测试**：新增 `test/client-checks.mjs`（11 条浏览器半检查：i18n 两侧 key 一致 / 缺 key 回退英文 /
+  当前项目置顶与活跃度排序 / 相对时间 / 状态色 / 路径认领 / 注入幂等与降级 / `apply` 注册五种 slot 且
+  没有 DOM 也不抛），`test/harness.mjs` 新增「看板快照形状」「工作区写入与拒绝」两组宿主检查。
+  `npm test` 共 43 条全绿，`npm run prepublishOnly` 里的 `spec-check` 也通过。
+
 ## 0.3.0 — 2026-11-18
 
 新增**辅助文件夹（多目录挂载）**与**项目主文件夹切换**：一个项目除主文件夹外可以挂多个目录，提示词、

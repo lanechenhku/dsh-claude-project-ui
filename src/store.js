@@ -37,6 +37,36 @@ export class ProjectStore {
     await writeJson(this.file(projectId, name), value);
     return value;
   }
+
+  /**
+   * A file that belongs to the install rather than to one project.
+   *
+   * The panel's own preferences (language override, thread visibility, sort)
+   * live here: they are not project data, and they must never be written into
+   * dsh-threads' storage.
+   */
+  globalFile(name) {
+    return join(this.root, name + ".json");
+  }
+
+  readGlobalSync(name, fallback) {
+    try {
+      const value = JSON.parse(readFileSync(this.globalFile(name), "utf8"));
+      return value === null || typeof value !== "object" ? fallback : value;
+    } catch {
+      return fallback;
+    }
+  }
+
+  async readGlobal(name, fallback) {
+    const value = await readJson(this.globalFile(name), null);
+    return value === null || typeof value !== "object" ? fallback : value;
+  }
+
+  async writeGlobal(name, value) {
+    await writeJson(this.globalFile(name), value);
+    return value;
+  }
 }
 
 function expand(path) {

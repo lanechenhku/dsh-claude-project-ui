@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { resolveConfig } from "./config.js";
-import { defaultThreadsStorage, ProjectRegistry } from "./project.js";
+import { defaultThreadsStorage, projectActivity, ProjectRegistry } from "./project.js";
 import { ProjectStore } from "./store.js";
 import { createTools } from "./tools.js";
 import { registerHubCommand } from "./command.js";
@@ -21,7 +21,9 @@ import {
   kbSectionText
 } from "./prompts.js";
 import { addFolder, grantFolders, loadFolders, loadFoldersSync, removeFolder } from "./folders.js";
-import { defaultWorkspaceStorage, setMainFolder } from "./mainfolder.js";
+import { defaultWorkspaceStorage, setMainFolder, setWorkspaceFolder } from "./mainfolder.js";
+import { listWorkspaces, workspaceRows } from "./workspaces.js";
+import { loadSettings, saveSettings } from "./settings.js";
 import { kbIndexText, loadKb, loadKbSync } from "./kb.js";
 import { boardContextText, boardView, convergeThreads, loadBoard, loadBoardSync } from "./board.js";
 import { digestText, eventsOf, loadNotes, loadNotesSync } from "./digest.js";
@@ -104,6 +106,17 @@ export async function apply(ctx, config) {
     storageDomain: () => lookupService(ctx, "storageDomain")
   };
 
+  // Panel preferences (this plugin's own file, never dsh-threads' storage). The
+  // two behaviour switches start from the profile's config values, so a profile
+  // that pinned them keeps its behaviour until someone flips the panel toggle.
+  const settingsDefaults = {
+    showResolvedThreads: resolved.hideResolvedThreads !== true,
+    autoConvergeReports: resolved.autoConvergeReports === true
+  };
+  let preferences = await loadSettings(store, settingsDefaults);
+  /** Read once per use: a route write must be visible to the very next snapshot. */
+  const currentPreferences = () => preferences;
+
   const warn = (message) => {
     try {
       ctx.logger?.warn?.("dsh-claude-project-ui: " + message);
@@ -124,6 +137,7 @@ export async function apply(ctx, config) {
   // Optional on purpose: headless / tui profiles load this plugin too.
   const BOARD_ROUTE = "/project-hub/board";
   const FOLDERS_ROUTE = "/project-hub/folders";
+  const SETTINGS_ROUTE = "/project-hub/settings";
   const readBody = (req) =>
     new Promise((resolve, reject) => {
       let size = 0;
@@ -141,18 +155,27 @@ export async function apply(ctx, config) {
       req.on("error", reject);
     });
 
-  const boardSnapshot = async () => {
+  const workspaceFile = () =>
+    resolved.workspaceStorage.trim().length > 0 ? resolved.workspaceStorage : defaultWorkspaceStorage(registry.path);
+  /** The whole panel's data, plus which project the requesting session belongs to. */
+  const boardSnapshot = async (sessionId) => {
     const projects = await registry.projects();
     const out = [];
     for (const project of projects) {
       const threads = await registry.threadsOf(project.id);
       const board = await loadBoard(store, project.id);
       const folders = await loadFolders(store, project.id);
-      const view = boardView(project, threads, board);
+      const view = boardView(project, threads, board, { all: currentPreferences().showResolvedThreads === true });
       out.push({
         id: project.id,
         title: project.title,
         folder: project.folder,
+        // Which workspace record places this project's new sessions; the
+        // settings page pairs the two and refuses to edit them apart.
+        workspaceId: project.workspaceId,
+        // Newest of the project record and its threads: the panel's ordering key
+        // and its "last active" label read this one value.
+        activity: projectActivity(project, threads),
         // Ours (this plugin's record), and theirs (present only when the
         // installed dsh-threads has the upstream folder feature).
         extraFolders: folders.folders,
@@ -162,12 +185,37 @@ export async function apply(ctx, config) {
           n: thread.n,
           title: thread.title,
           state: thread.state,
+          code: thread.code,
           branch: thread.branch
         })),
         tasks: view.tasks
       });
     }
-    return { projects: out, sandbox: { available: runtime.sandboxAvailable() } };
+    // "Current project" = the project the asking session belongs to. The panel
+    // is not session-scoped, so it passes the session it was opened next to; an
+    // unknown or absent id simply yields no current card.
+    let currentProjectId = null;
+    const asking = typeof sessionId === "string" ? sessionId.trim() : "";
+    if (asking.length > 0) {
+      try {
+        currentProjectId = (await registry.roleOf(asking)).project?.id ?? null;
+      } catch (error) {
+        warn("cannot resolve the asking session " + asking + ": " + String(error));
+      }
+    }
+    const workspaces = workspaceRows(
+      await listWorkspaces(workspaceFile()),
+      out.map((project) => ({ ...project, extraFolderCount: project.extraFolders.length }))
+    );
+    return {
+      projects: out,
+      workspaces,
+      currentProjectId,
+      // The panel renders itself from these, so a toggle takes effect on the very
+      // next snapshot without a restart.
+      settings: currentPreferences(),
+      sandbox: { available: runtime.sandboxAvailable() }
+    };
   };
 
   try {
@@ -178,8 +226,22 @@ export async function apply(ctx, config) {
         path: BOARD_ROUTE,
         handler: async (req, res) => {
           try {
-            if (req.method !== "GET") await readBody(req);
-            const snapshot = await boardSnapshot();
+            // The panel posts the session it is open next to, so the snapshot can
+            // mark that session's project as the current one. A GET or a body
+            // without a session id is valid too: there is simply no current card.
+            let sessionId = "";
+            if (req.method !== "GET") {
+              const raw = await readBody(req);
+              if (raw.trim().length > 0) {
+                try {
+                  const body = JSON.parse(raw);
+                  if (typeof body?.sessionId === "string") sessionId = body.sessionId;
+                } catch {
+                  // a malformed body is not worth failing the whole panel over
+                }
+              }
+            }
+            const snapshot = await boardSnapshot(sessionId);
             res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
             res.end(JSON.stringify({ ok: true, ...snapshot }));
           } catch (error) {
@@ -220,11 +282,45 @@ export async function apply(ctx, config) {
             }
             const raw = await readBody(req);
             const body = JSON.parse(raw.length > 0 ? raw : "{}");
+            const action = String(body.action ?? "");
+            // A bare workspace belongs to no project, so it is the one action that
+            // does not need a project id; every other action edits one project.
+            if (action === "workspace") {
+              const workspaceId = typeof body.workspaceId === "string" ? body.workspaceId.trim() : "";
+              if (workspaceId.length === 0) return reply(400, { ok: false, error: "缺少 workspaceId" });
+              // A workspace a project owns is moved from the project row instead:
+              // rewriting only the workspace would leave the project record pointing
+              // at the old directory while new sessions open somewhere else.
+              const owners = (await registry.projects()).filter((candidate) => candidate.workspaceId === workspaceId);
+              if (owners.length > 0) {
+                return reply(400, {
+                  ok: false,
+                  error:
+                    "这个工作区属于项目「" + owners[0].title + "」：请在项目那一行改，两处记录要一起动，不能只改一边"
+                });
+              }
+              const moved = await setWorkspaceFolder({
+                facility: runtime.storageDomain(),
+                workspacePath: workspaceFile(),
+                workspaceId,
+                folder: body.path,
+                protectedTrees: [store.root]
+              });
+              return reply(200, {
+                ok: true,
+                workspaceId,
+                folder: moved.folder,
+                changed: moved.changed,
+                before: moved.before,
+                via: moved.via,
+                backups: moved.backups,
+                restartRequired: moved.restartRequired === true
+              });
+            }
             const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
             const projects = await registry.projects();
             const project = projects.find((candidate) => candidate.id === projectId);
             if (project === undefined) return reply(404, { ok: false, error: "没有这个项目" });
-            const action = String(body.action ?? "");
             let state;
             if (action === "add") {
               state = await addFolder(store, project.id, {
@@ -241,9 +337,7 @@ export async function apply(ctx, config) {
               const switched = await setMainFolder({
                 facility: runtime.storageDomain(),
                 threadsPath: registry.path,
-                workspacePath: resolved.workspaceStorage.trim().length > 0
-                  ? resolved.workspaceStorage
-                  : defaultWorkspaceStorage(registry.path),
+                workspacePath: workspaceFile(),
                 projectId: project.id,
                 folder: body.path,
                 protectedTrees: [store.root]
@@ -265,7 +359,7 @@ export async function apply(ctx, config) {
                 sandbox: { available: runtime.sandboxAvailable() }
               });
             } else {
-              return reply(400, { ok: false, error: "action 只能是 add / remove / main" });
+              return reply(400, { ok: false, error: "action 只能是 add / remove / main / workspace" });
             }
             // Re-register the sandbox grants of live sessions right away instead
             // of waiting for the next sweep.
@@ -289,6 +383,47 @@ export async function apply(ctx, config) {
   } catch (error) {
     warn("cannot register the folders route: " + String(error));
     breadcrumb("folders route failed: " + String(error));
+  }
+
+
+  // ---- panel preferences (the board's ⚙ settings) ----
+  try {
+    const webServer = ctx.webServer;
+    if (webServer !== undefined && webServer !== null && typeof webServer.register === "function") {
+      const off = webServer.register({
+        kind: "exact",
+        path: SETTINGS_ROUTE,
+        handler: async (req, res) => {
+          const reply = (status, payload) => {
+            res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify(payload));
+          };
+          try {
+            if (req.method !== "POST") return reply(405, { ok: false, error: "只支持 POST" });
+            if (req.headers["x-project-hub"] !== "1") {
+              return reply(403, { ok: false, error: "缺少 x-project-hub 请求头" });
+            }
+            const raw = await readBody(req);
+            const body = JSON.parse(raw.length > 0 ? raw : "{}");
+            // Accept both { patch: {...} } and a bare field object.
+            const patch = body !== null && typeof body.patch === "object" && body.patch !== null ? body.patch : body;
+            preferences = await saveSettings(store, patch, settingsDefaults);
+            // Section text and grants follow the next sweep anyway; asking now makes
+            // the injected board react to the same click.
+            syncAll();
+            reply(200, { ok: true, settings: preferences });
+          } catch (error) {
+            reply(400, { ok: false, error: String(error?.message ?? error) });
+          }
+        }
+      });
+      if (typeof off === "function") ctx.effect?.(() => off, "dsh-claude-project-ui: settings route");
+      info("panel settings route at " + SETTINGS_ROUTE);
+      breadcrumb("settings route registered at " + SETTINGS_ROUTE);
+    }
+  } catch (error) {
+    warn("cannot register the settings route: " + String(error));
+    breadcrumb("settings route failed: " + String(error));
   }
 
   /** sessionId -> { kb, board, digest, folders } prompt text, read synchronously by the host. */
@@ -316,7 +451,7 @@ export async function apply(ctx, config) {
     }
     try {
       const threads = await registry.threadsOf(role.project.id);
-      if (resolved.autoConvergeReports === true) {
+      if (currentPreferences().autoConvergeReports === true) {
         await convergeThreads(store, role.project.id, threads).catch((error) =>
           warn("cannot converge thread reports: " + String(error))
         );
@@ -327,7 +462,7 @@ export async function apply(ctx, config) {
         loadNotes(store, role.project.id),
         loadFolders(store, role.project.id)
       ]);
-      const view = boardView(role.project, threads, board, { all: resolved.hideResolvedThreads !== true });
+      const view = boardView(role.project, threads, board, { all: currentPreferences().showResolvedThreads === true });
       textCache.set(sessionId, {
         kb: kbSectionText(kbIndexText(kb, resolved.knowledgeIndexMaxChars, resolved.kbIndexMaxDocs), role.kind),
         folders: foldersSectionText(folders.folders, resolved.foldersContextMaxChars),
@@ -352,7 +487,7 @@ export async function apply(ctx, config) {
       const board = loadBoardSync(store, role.project.id);
       const digest = loadNotesSync(store, role.project.id);
       const folders = loadFoldersSync(store, role.project.id);
-      const view = boardView(role.project, threads, board, { all: resolved.hideResolvedThreads !== true });
+      const view = boardView(role.project, threads, board, { all: currentPreferences().showResolvedThreads === true });
       textCache.set(sessionId, {
         kb: kbSectionText(kbIndexText(kb, resolved.knowledgeIndexMaxChars, resolved.kbIndexMaxDocs), role.kind),
         folders: foldersSectionText(folders.folders, resolved.foldersContextMaxChars),

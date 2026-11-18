@@ -748,6 +748,225 @@ check("folders route switches the main folder and reports restartRequired", asyn
   assert.equal(same.json.changed, false);
 });
 
+// ---- panel data shape (the settings page's rows) ---------------------------
+
+check("board snapshot carries activity, workspaces and the asking session's project", async () => {
+  const route = routes.get("/project-hub/board");
+  assert.ok(route, "board route not registered");
+  const post = async (body) => {
+    const res = fakeResponse();
+    await route.handler(fakeRequest(body ?? {}, {}), res);
+    return { status: res.status, json: JSON.parse(res.text) };
+  };
+
+  const snapshot = await post({ sessionId: "session-t1" });
+  assert.equal(snapshot.status, 200);
+  assert.equal(snapshot.json.ok, true);
+  // The panel is not session-scoped: it sends the conversation it is open next
+  // to, and the host resolves that session to its project.
+  assert.equal(snapshot.json.currentProjectId, "project-1");
+  const project = snapshot.json.projects.find((entry) => entry.id === "project-1");
+  assert.ok(project, "project-1 missing from the snapshot");
+  assert.equal(project.folder, await realpath(folderD));
+  assert.equal(project.workspaceId, "ws-main");
+  assert.deepEqual(project.extraFolders, [canonicalA]);
+  assert.match(String(project.activity), /^\d{4}-\d{2}-\d{2}T/, "activity is not an ISO timestamp");
+  // Newest of the project record and its threads.
+  assert.ok(project.activity >= "2026-11-18T00:20:00.000Z", "activity ignored the threads: " + project.activity);
+
+  // The settings page's second half: every workspace, joined to its project.
+  const workspaces = snapshot.json.workspaces;
+  assert.ok(Array.isArray(workspaces) && workspaces.length >= 3, "workspaces missing from the snapshot");
+  for (const workspace of workspaces) {
+    assert.equal(typeof workspace.id, "string");
+    assert.equal(typeof workspace.title, "string");
+    assert.equal(typeof workspace.path, "string");
+    assert.equal(typeof workspace.sessionCount, "number");
+    assert.equal(typeof workspace.extraFolderCount, "number");
+    assert.equal(typeof workspace.editable, "boolean");
+    assert.ok(workspace.projectId === null || typeof workspace.projectId === "string");
+  }
+  const owned = workspaces.find((entry) => entry.id === "ws-main");
+  assert.equal(owned.projectId, "project-1");
+  assert.equal(owned.editable, false, "a project-owned workspace must not be editable on its own");
+  const bare = workspaces.find((entry) => entry.id === "ws-other");
+  assert.equal(bare.projectId, null);
+  assert.equal(bare.editable, true, "a workspace no project owns must be editable");
+
+  // No session id: nothing is promoted.
+  const anonymous = await post({});
+  assert.equal(anonymous.json.currentProjectId, null);
+  assert.equal(anonymous.json.projects.length, snapshot.json.projects.length);
+
+  // An unknown session promotes nothing instead of failing the panel.
+  const stranger = await post({ sessionId: "session-nobody" });
+  assert.equal(stranger.status, 200);
+  assert.equal(stranger.json.currentProjectId, null);
+
+  // A malformed body is ignored, not a 500.
+  const broken = { method: "POST", headers: {}, on(event, handler) { if (event === "data") handler(Buffer.from("{not json")); else if (event === "end") handler(); return broken; } };
+  const res = fakeResponse();
+  await route.handler(broken, res);
+  assert.equal(res.status, 200);
+  assert.equal(JSON.parse(res.text).currentProjectId, null);
+});
+
+check("folders route moves a bare workspace and refuses one a project owns", async () => {
+  const route = routes.get("/project-hub/folders");
+  assert.ok(route, "folders route not registered");
+  const post = async (body) => {
+    const res = fakeResponse();
+    await route.handler(fakeRequest(body, { "x-project-hub": "1" }), res);
+    return { status: res.status, json: JSON.parse(res.text) };
+  };
+  const before = JSON.parse(await readFile(workspaceStorage, "utf8"));
+
+  // ws-other belongs to no project: only workspace.json moves.
+  const moved = await post({ action: "workspace", workspaceId: "ws-other", path: folderB });
+  assert.equal(moved.status, 200);
+  assert.equal(moved.json.changed, true);
+  assert.equal(moved.json.folder, await realpath(folderB));
+  assert.equal(moved.json.restartRequired, true);
+  assert.equal(moved.json.backups.length, 1, "a workspace move must back the workspace storage up");
+  const after = JSON.parse(await readFile(workspaceStorage, "utf8"));
+  assert.equal(after.tables.workspaces["ws-other"].path, await realpath(folderB));
+  assert.equal(after.tables.workspaces["ws-main"].path, before.tables.workspaces["ws-main"].path);
+  // The project record is untouched by a workspace-only move.
+  const threads = JSON.parse(await readFile(storage, "utf8"));
+  assert.equal(threads.tables.projects["project-1"].folder, await realpath(folderD));
+
+  // Same directory as another workspace: refused, exactly like a project switch.
+  const clash = await post({ action: "workspace", workspaceId: "ws-other", path: folderD });
+  assert.equal(clash.status, 400);
+  assert.match(clash.json.error, /另一个工作区/);
+
+  // A workspace a project owns is refused by name: two records must move together.
+  const owned = await post({ action: "workspace", workspaceId: "ws-main", path: folderC });
+  assert.equal(owned.status, 400);
+  assert.match(owned.json.error, /项目/);
+  const unchanged = JSON.parse(await readFile(workspaceStorage, "utf8"));
+  assert.equal(unchanged.tables.workspaces["ws-main"].path, before.tables.workspaces["ws-main"].path);
+
+  // Dangerous targets are refused by the shared validator.
+  const dangerous = await post({ action: "workspace", workspaceId: "ws-other", path: "/Applications" });
+  assert.equal(dangerous.status, 400);
+  assert.match(dangerous.json.error, /系统目录/);
+
+  // No workspace id at all.
+  const missing = await post({ action: "workspace", path: folderC });
+  assert.equal(missing.status, 400);
+  assert.match(missing.json.error, /workspaceId/);
+});
+
+// ---- panel preferences (the board's ⚙ settings) ---------------------------
+
+check("settings: round-trip through this plugin's own file, and the snapshot echoes it", async () => {
+  const { loadSettings, saveSettings, settingsFile } = await import("../src/settings.js");
+  const { ProjectStore } = await import("../src/store.js");
+  const store = new ProjectStore({ dataDir });
+
+  // Defaults come from the profile config: hide resolved threads, converge on.
+  const initial = await loadSettings(store, {});
+  assert.equal(initial.language, "auto");
+  assert.equal(initial.showResolvedThreads, false);
+  assert.equal(initial.autoConvergeReports, true);
+  assert.equal(initial.otherCardsExpanded, false);
+  assert.equal(initial.sort, "activity");
+
+  // Write → read back, through the file the plugin owns.
+  const saved = await saveSettings(store, { language: "zh", sort: "title" }, {});
+  assert.equal(saved.language, "zh");
+  assert.equal(saved.sort, "title");
+  const file = settingsFile(store);
+  assert.ok(file.startsWith(dataDir), "the settings file must live in this plugin's data dir: " + file);
+  const raw = JSON.parse(await readFile(file, "utf8"));
+  assert.equal(raw.language, "zh");
+  assert.equal(raw.sort, "title");
+  const reread = await loadSettings(store, {});
+  assert.deepEqual({ ...reread }, { ...saved });
+
+  // Out-of-range values are clamped instead of stored.
+  const clamped = await saveSettings(store, { language: "fr", sort: "nope" }, {});
+  assert.equal(clamped.language, "auto");
+  assert.equal(clamped.sort, "activity");
+
+  // The route the panel uses: header-gated, patch-mergeing, echoing the result.
+  const route = routes.get("/project-hub/settings");
+  assert.ok(route, "settings route not registered");
+  const post = async (body, headers) => {
+    const res = fakeResponse();
+    await route.handler(fakeRequest(body, headers), res);
+    return { status: res.status, json: JSON.parse(res.text) };
+  };
+  const blocked = await post({ patch: { language: "en" } }, {});
+  assert.equal(blocked.status, 403);
+  const ok = await post({ patch: { language: "en", otherCardsExpanded: true } }, { "x-project-hub": "1" });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.json.settings.language, "en");
+  assert.equal(ok.json.settings.otherCardsExpanded, true);
+  // A patch keeps the fields it does not mention.
+  const merged = await post({ patch: { autoConvergeReports: false } }, { "x-project-hub": "1" });
+  assert.equal(merged.json.settings.language, "en");
+  assert.equal(merged.json.settings.otherCardsExpanded, true);
+  assert.equal(merged.json.settings.autoConvergeReports, false);
+
+  // The panel reads them from the same snapshot it renders.
+  const res = fakeResponse();
+  await routes.get("/project-hub/board").handler(fakeRequest({}, {}), res);
+  const snapshot = JSON.parse(res.text);
+  assert.equal(snapshot.settings.language, "en");
+  assert.equal(snapshot.settings.autoConvergeReports, false);
+
+  // A preference write never touches dsh-threads' storage.
+  const threads = JSON.parse(await readFile(storage, "utf8"));
+  assert.equal(threads.tables.projects["project-1"].folder, await realpath(folderD));
+  assert.equal(JSON.stringify(threads).includes("otherCardsExpanded"), false);
+});
+
+check("settings: showing resolved threads is a host-side filter, not a client one", async () => {
+  const route = routes.get("/project-hub/settings");
+  const post = async (patch) => {
+    const res = fakeResponse();
+    await route.handler(fakeRequest({ patch }, { "x-project-hub": "1" }), res);
+    return { status: res.status, json: JSON.parse(res.text) };
+  };
+  const snapshot = async () => {
+    const res = fakeResponse();
+    await routes.get("/project-hub/board").handler(fakeRequest({}, {}), res);
+    return JSON.parse(res.text);
+  };
+
+  // A resolved thread appears in the registry only after this write.
+  const doc = JSON.parse(await readFile(storage, "utf8"));
+  doc.tables.threads["session-resolved"] = {
+    id: "session-resolved",
+    mainSessionId: "session-main",
+    n: 8,
+    title: "已完成的旧事",
+    status: "idle",
+    resolved: true,
+    worktree: null,
+    updatedAt: "2026-11-17T00:00:00.000Z"
+  };
+  await writeFile(storage, JSON.stringify(doc, null, 2));
+
+  await post({ showResolvedThreads: false });
+  const hidden = await snapshot();
+  const hiddenProject = hidden.projects.find((project) => project.id === "project-1");
+  assert.equal(hidden.settings.showResolvedThreads, false);
+  assert.ok(!hiddenProject.threads.some((thread) => thread.n === 8), "a resolved thread leaked into the hidden view");
+  assert.ok(hiddenProject.hidden >= 1, "the hidden count did not grow");
+
+  await post({ showResolvedThreads: true });
+  const shown = await snapshot();
+  const shownProject = shown.projects.find((project) => project.id === "project-1");
+  assert.equal(shown.settings.showResolvedThreads, true);
+  assert.ok(shownProject.threads.some((thread) => thread.n === 8), "the resolved thread did not appear");
+
+  // Back to the default so nothing downstream inherits the switch.
+  await post({ showResolvedThreads: false });
+});
+
 check("dispose clears everything", () => {
   for (const dispose of disposers) {
     if (typeof dispose === "function") dispose();
@@ -759,6 +978,12 @@ function installedCount() {
   // after dispose the harness only needs to prove the disposers ran without throwing
   return 0;
 }
+
+// Browser half: loaded the way the client module loader loads it (a stubbed
+// window captures the factory), so these checks run the shipped bundle.
+const { runClientChecks } = await import("./client-checks.mjs");
+const { fileURLToPath } = await import("node:url");
+await runClientChecks(check, fileURLToPath(new URL("../src/client.js", import.meta.url)));
 
 await Promise.all(pending);
 for (const dispose of disposers) {

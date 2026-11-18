@@ -145,6 +145,10 @@ function normalize(parsed) {
       extraFolders: Array.isArray(raw.extraFolders)
         ? raw.extraFolders.filter((entry) => typeof entry === "string" && entry.length > 0)
         : [],
+      // Which DSH workspace this project's new sessions are placed from. Read
+      // here because the settings page lists workspaces next to their project;
+      // writes still go through src/mainfolder.js only.
+      workspaceId: typeof raw.workspaceId === "string" ? raw.workspaceId : "",
       mainSessionId: typeof raw.mainSessionId === "string" ? raw.mainSessionId : "",
       instructions: typeof raw.instructions === "string" ? raw.instructions : "",
       goal: typeof raw.goal === "string" ? raw.goal : "",
@@ -186,6 +190,22 @@ function toArray(table) {
   return [];
 }
 
+/**
+ * Newest activity of one project: its own record or any thread under it.
+ *
+ * ISO-8601 strings sort lexicographically, so comparison stays a plain string
+ * compare. The board's "other projects newest first" ordering and the panel's
+ * "last active" label both read this one value.
+ */
+export function projectActivity(project, threads) {
+  let newest = typeof project?.updatedAt === "string" ? project.updatedAt : "";
+  for (const thread of threads ?? []) {
+    const at = typeof thread?.updatedAt === "string" ? thread.updatedAt : "";
+    if (at > newest) newest = at;
+  }
+  return newest;
+}
+
 /** Human label for a thread's latest state, used by the board and the digest. */
 export function threadState(thread) {
   const report = thread.lastReport ?? null;
@@ -200,6 +220,27 @@ export function threadState(thread) {
   if (thread.status === "starting") return "启动中";
   if (thread.status === "failed") return "失败";
   return thread.status === "" ? "未知" : thread.status;
+}
+
+/**
+ * The same state as {@link threadState}, as a stable code the panel translates.
+ *
+ * The Chinese label is prompt text (the model reads it); the panel must not, or
+ * its rows would stay Chinese in an English UI.
+ */
+export function threadStateCode(thread) {
+  const report = thread.lastReport ?? null;
+  const reportStatus = typeof report?.status === "string" ? report.status : "";
+  if (thread.stopped === true) return "stopped";
+  if (thread.resolved === true) return "resolved";
+  if (reportStatus === "needs_decision") return "waiting";
+  if (reportStatus === "blocked") return "blocked";
+  if (reportStatus === "failed") return "failed";
+  if (thread.status === "running") return "running";
+  if (thread.status === "idle") return "idle";
+  if (thread.status === "starting") return "starting";
+  if (thread.status === "failed") return "failed";
+  return "unknown";
 }
 
 export function threadBranch(thread) {

@@ -108,12 +108,30 @@ dsh-threads 换存储格式时本插件静默降级为「不注入」，不会�
 
 ## 看板面板（侧栏）
 
-浏览器半会往**右侧栏**加一个「项目看板」页签，和 dsh-threads 的「讨论串」并列（会话头部还有一个「▤ 项目看板」按钮可以一键打开）：
+浏览器半会往**右侧栏**加一个「项目看板」页签，和 dsh-threads 的「讨论串」并列（会话头部还有一个「▤ 项目看板」按钮可以一键打开）。
+版式是**两层**的，不再是一堆项目平铺：
 
-- 按项目分组，列出**进行中的讨论串**（编号、标题、状态、worktree 分支）
-- 列出**任务**（编号、标题、状态、负责人），含自动汇总的讨论串任务
-- 默认隐藏已解决/已归档的讨论串，只提示「另有 N 个」
-- 「刷新」按钮重新拉取；数据来自宿主半的 `POST /project-hub/board`，**只读**
+- **顶部：当前项目**一张独立卡片。左侧 3px 强调色竖条 + 项目名 + monospace 小字路径；
+  右上「切换文件夹⋯」打开共用弹窗，右侧箭头展开/收起讨论串与任务；卡片内还有「辅助文件夹（N）」折叠区。
+  「当前项目」= 打开面板时所在那个对话所属的项目（面板把会话 id 发给宿主，宿主查 dsh-threads 记录解析）；
+  解析不出来就不强行置顶，下面直接按活跃度排。
+- **分隔**：一条 2px 粗分隔 + 文字「其他项目 · N」（英文 `Other projects · N`），**滚动时吸顶**。
+- **其他项目**：按最近活动时间（项目记录与它所有讨论串里最新的那个）倒序，每个项目一行**紧凑卡片**
+  （名称 + 讨论串/任务数量 + 最近活动时间），点开才展开讨论串与任务行；卡片之间是 1px 细线 + 12px 间距。
+- **讨论串行** = 状态点（6px）+ `#编号` + 标题（单行省略）+ 右侧状态词。
+  状态点颜色：进行中=蓝、待办=灰、受阻/待决策=橙、已完成/已解决=绿、空闲/已停止=浅灰。
+- **任务行** = 状态 pill + 任务号 + 主题 + 右侧「+」（复制任务号，`/hub done <id>` 用）。
+- 空状态只留一行浅色提示，不占大块；「刷新」重新拉取。
+- 数据来自宿主半的 `POST /project-hub/board`，**只读**。
+- 头部「刷新」左边有一个 **⚙ 看板设置**（同一套 portal 的紧凑面板，宽 360）：
+  语言（跟随应用 / 中文 / English，手动选择优先于应用语言，括号里显示当前应用语言）、
+  显示已解决 / 已归档的讨论串（默认关）、自动把讨论串回报汇总成任务（默认开）、
+  「其他项目」卡片默认折叠 / 展开、排序（最近活动 / 名称）、以及「项目文件夹管理…」。
+  **改完立刻生效并持久化**，不需要重启；存在本插件自己的 `settings.json` 里（不写 dsh-threads 的存储）。
+  其中「隐藏讨论串」和「回报汇总」是宿主侧行为，所以宿主也读同一份设置。
+
+视觉规范（不改主题也深浅两套都能看）：8px 网格间距、圆角 10、边框 `rgba(127,127,127,0.18)`、
+hover 背景 `rgba(127,127,127,0.06)`、**不用大阴影**、字号 12/13、路径用 monospace 11。
 
 面板只在 Web GUI（`desktop` / `web` profile）出现；`tui` / headless 没有侧栏，
 退化成 `/hub board` 命令和 `board_list` 工具。
@@ -121,7 +139,7 @@ dsh-threads 换存储格式时本插件静默降级为「不注入」，不会�
 ## 辅助文件夹（多目录挂载）
 
 一个项目除了主文件夹，还可以挂载多个**辅助文件夹**（类似 Claude Code 的 additional directories）。
-在右侧「▤ 项目看板」页签里按项目增删，也可以用命令：
+在「▤ 项目看板」当前项目卡片的「辅助文件夹」折叠区里、或在文件夹弹窗里增删，也可以用命令：
 
 ```text
 /hub folders                 列出已挂载的辅助文件夹
@@ -171,6 +189,74 @@ dsh-threads 换存储格式时本插件静默降级为「不注入」，不会�
 - **耦合风险**：`dsh_threads`/`workspace` 的 domain 名与字段是 dsh-threads 和 DSH 的私有契约；
   上游 PR #61 合并后应改用它提供的官方入口。字段变了会在切换时直接报错并回滚（不会写坏记录）。
   详见 [`docs/folders-feasibility.md`](docs/folders-feasibility.md)。
+
+## 文件夹的三个入口（同一套组件、同一条写入路径）
+
+改文件夹有三处，行为一致：都打开**同一个弹窗**，都走宿主半 `src/mainfolder.js` 那一条写入路径
+（备份 → realpath → 校验 → 串行 → 读回 → 失败回滚），没有第二套实现。
+
+| 入口 | 位置 | 作用范围 |
+| --- | --- | --- |
+| **A** | 看板里**当前项目卡片**的「切换文件夹⋯」+「辅助文件夹」折叠区 | 只作用当前项目 |
+| **B** | 设置页新分节「项目文件夹 / Project folders」 | **逐行**改任意一个项目或工作区 |
+| **C** | dsh-threads 自己的「项目设置 → 通用 → 文件夹」卡片里注入的「⚙ 更多文件夹⋯」 | 打开的那个项目 |
+
+三处都写明同一件事：
+
+> 改动会写入 dsh-threads 的项目记录与 workspace 记录；dsh-threads 自己的设置面板要重启 DSH 之后才同步显示
+> （它读自己的 client store，不订阅存储变更）。
+
+细节：
+
+- **B 刻意没有「批量改全部」**：一次误点就会冲掉十几个项目记录，所以只做逐个修改。
+  项目行会同时改项目记录与工作区记录；工作区行只改工作区记录。
+  已经被项目占用的工作区**不能**单独改——请求会被拒绝并提示去项目那一行改，两处记录必须一起动；
+  没有项目用的工作区才可以单独改（只动 `workspace.json`，同样有备份 / 读回 / 回滚）。
+- **C 的注入约束**：`MutationObserver` 在 dsh-threads 的文件夹卡片里找 `.dsht-setting-path` 锚点，
+  找不到就**静默不注入**；重复触发**幂等**（同一个卡片永远只有一个按钮，文案跟着语言刷新）；
+  所有 DOM 读写都包在 `try/catch` 里，dsh-threads 的 DOM 结构变了最多掉按钮，绝不抛到宿主、不会白屏。
+  卡片里显示的是那个项目的文件夹路径，按钮据此在项目记录里认领项目再打开同一个弹窗。
+
+### 文件夹弹窗（0.4.1 起）
+
+三个入口打开的是同一个弹窗，结构固定，只有这几块：
+
+```text
+项目名（粗体）
+当前主文件夹
+/Users/me/code/app                       ✕
+[更换…]  手动输入路径                       已保存（2 秒）
+──────────────────────────────────────────────
+辅助文件夹  (2)
+  ▱ /Users/me/data              [移除]
+  ▱ /Users/me/notes             [移除]
+  [/Users/me/another____]  [添加]
+辅助文件夹会登记为每个会话的沙箱可写根；改动写入 dsh-threads 记录，其设置面板重启后同步。
+```
+
+- 弹窗**portal 到 `document.body`**（容器 `#project-hub-dialog-root`，`role="dialog"` / `aria-modal="true"`），
+  所以不会被面板、设置页或 dsh-threads 自己的 Modal 压住——`position: fixed` 的 `z-index` 只在当前层叠上下文里比大小，
+  而宿主的父级只要有一个 `transform` 就能把弹窗困在下面。
+- 打开时锁 `body` 滚动；**Esc** 关闭、**点遮罩**关闭。
+- 成功反馈只有「已保存」，2 秒后自己消失；没有 toast，没有 alert，没有大段说明。
+- 路径单行省略，鼠标悬停显示全路径。
+- 更长的解释（沙箱授权语义、重启边界、两处记录为什么要一起改）都在本文档下面的章节里，弹窗里只剩一行脚注。
+
+## 双语（跟随应用语言）
+
+**怎么切成英文**：侧栏底部「设置」→「通用」→「语言」那一行 → 选 `English`（语言项由 DSH 自己的
+`dsh-client-locale` 提供，切换后其它插件与内核文案一起换）。切完**不用刷新**：本插件的面板、弹窗、
+设置页、注入按钮会立刻重渲染。
+
+面板、弹窗、设置页和注入按钮的**所有**文案都在 `src/client.js` 的 `MESSAGES.zh` / `MESSAGES.en` 两张表里
+（各 79 个 key；测试会校验两侧 key 完全一致、没有空文案、并且没有「表里有但没地方用」的 key）：
+
+- 语言来自 DSH 的 **locale 服务**（`dsh-client-locale`）：`ctx.locale.getLocale()` 读当前语言、
+  `ctx.on("locale/change")` 跟随切换、`ctx.locale.register("project-hub", { zh, en })` 登记字典。
+  切换语言后面板 / 弹窗 / 设置页**立刻**换文案，不用刷新。
+- **缺 key 时的回退顺序：当前语言 → 英文 → 中文 → key 本身**。英文是兜底，所以漏翻译只会退回英文，
+  不会露出 `board.section.others` 这种原始 key。
+- 侧栏页签标题这类由宿主渲染的文字用 thunk 提供，宿主下次渲染时跟上新语言。
 
 ## 安装
 
@@ -270,12 +356,13 @@ dsh plugin --profile web add dsh-claude-project-ui
 | `maxNotes` | `200` | 每个项目保留多少条 `hub_note` 进展笔记 |
 | `maxDocs` | `200` | 每个项目允许的知识库文档数 |
 | `maxKnowledgeChars` | `4000000` | 每个项目知识库总字符数上限 |
-| `hideResolvedThreads` | `true` | 看板与注入里隐藏已解决 / 已归档讨论串；`board_list all=true` 可看全部 |
-| `autoConvergeReports` | `true` | 讨论串回报自动汇总成看板任务（按 `threadId` 幂等） |
+| `hideResolvedThreads` | `true` | **初始**值：⚙ 里「显示已解决 / 已归档的讨论串」；设置文件一旦存在以它为准。`board_list all=true` 单次仍可看全部 |
+| `autoConvergeReports` | `true` | **初始**值：⚙ 里「自动把讨论串回报汇总成任务」（按 `threadId` 幂等） |
 
 ## 数据
 
 ```
+~/.dsh/project-hub/settings.json          看板设置（语言/隐藏/汇总/卡片/排序；本插件自己的）
 ~/.dsh/project-hub/projects/<projectId>/
   knowledge.json   知识库文档
   board.json       手动任务
@@ -302,7 +389,10 @@ dsh plugin --profile web add dsh-claude-project-ui
 - 辅助文件夹的沙箱授权只在 `workspace-write` 生效；`read-only` 下核心工具本来就写不了。
   授权是运行时状态，重启 / resume 后需要重新登记（刷新循环会自动做，最多延迟 10 秒）。
 - 轮询刷新：每 10 秒 + agent 状态变化时刷新提示词快照，最坏情况看到的是 10 秒前的看板。
-- 看板默认隐藏已解决/已归档的讨论串；想全看用 `board_list all=true` 或 `/hub board --all`。
+- 看板默认隐藏已解决/已归档的讨论串（⚙ 里可以打开）；一次性看全部用 `board_list all=true` 或 `/hub board --all`。
+- 配置里的 `hideResolvedThreads` / `autoConvergeReports` 现在是**初始默认值**：⚙ 里一改就以设置文件为准。
+- ⚙ 面板的「项目文件夹管理…」不跳转设置页：DSH 没有公开「打开设置页某个分节」的客户端 API，
+  它在同一个面板里渲染**同一个**管理组件（逐行修改，没有批量）。
 
 ## 验收记录（2026-11-18，本机 desktop profile）
 
@@ -445,12 +535,38 @@ and they run in order with a per-line report. A trailing `→ note` is treated a
 
 ## Board panel (sidebar)
 
-The browser half registers a "项目看板" tab in the **right-hand sidebar pane**, next to dsh-threads' "讨论串" tab (the session header also gets a "▤ 项目看板" button that opens it):
+The browser half registers a tab in the **right-hand sidebar pane**, next to dsh-threads' thread list (the
+session header also gets a "▤ Project board" button that opens it). The layout has two layers instead of
+one flat list of projects:
 
-- Projects grouped, each listing **live threads** (number, title, state, worktree branch)
-- **Tasks** (id, title, status, owner), including the automatically rolled-up thread tasks
-- Resolved and archived threads are hidden by default, with a "N more" note
-- A "Refresh" button; data comes from the host half's `POST /project-hub/board` and is **read-only**
+- **Top: the current project**, one card of its own. A 3px accent rail on the left, the project name, the
+  path in 11px monospace; "Change folder…" in the top right opens the shared dialog, the chevron expands
+  the thread and task rows, and an "Auxiliary folders (N)" section collapses underneath.
+  "Current" means the project of the conversation the panel was opened next to: the panel sends its session
+  id, the host resolves it against dsh-threads' records. When nothing resolves, no card is promoted and the
+  list is simply ordered by activity.
+- **Divider**: a 2px rule carrying "Other projects · N" that **sticks to the top while scrolling**.
+- **Other projects** sort by newest activity (the newest of the project record and all its threads) and each
+  is a compact card — name, thread and task counts, last active — that expands into its rows on click.
+  Cards are separated by a 1px hairline plus 12px of space.
+- **Thread row** = 6px status dot + `#n` + title (single line, ellipsised) + state word on the right.
+  Dot colours: running = blue, to do = grey, blocked / needs a decision = orange, done / resolved = green,
+  idle / stopped = light grey.
+- **Task row** = status pill + task id + subject + a "+" on the right that copies the id for `/hub done <id>`.
+- An empty state is one faint line, not a block; "Refresh" reloads.
+- Data comes from the host half's `POST /project-hub/board` and is **read-only**.
+- Left of "Refresh" there is a **⚙ board settings** popover (the same portal, 360px wide):
+  language (follow the app / 中文 / English — a manual choice beats the app language, and the follow
+  option shows the current app language in parentheses), show resolved and archived threads (off by
+  default), roll thread reports into tasks (on by default), whether "other projects" cards start
+  expanded, the sort order (last active / name), and "Manage project folders…".
+  **Every change applies immediately and is persisted**, no restart: it lives in this plugin's own
+  `settings.json`, never in dsh-threads' storage. Hiding threads and rolling up reports are host-side
+  behaviours, so the host reads the same file.
+
+Visual rules (both themes, without touching the theme): 8px spacing grid, radius 10, border
+`rgba(127,127,127,0.18)`, hover wash `rgba(127,127,127,0.06)`, **no large shadows**, type at 12/13px,
+paths in 11px monospace.
 
 The panel only exists in the Web GUI (`desktop` / `web` profiles). `tui` and headless have no
 sidebar and fall back to the `/hub board` command and the `board_list` tool.
@@ -458,7 +574,8 @@ sidebar and fall back to the `/hub board` command and the `board_list` tool.
 ## Mounted folders (additional directories)
 
 A project can mount extra **auxiliary folders** on top of its main folder (Claude Code's additional
-directories idea). Add or remove them per project in the "▤ 项目看板" tab, or by command:
+directories idea). Add or remove them in the current-project card's "Auxiliary folders" section, in the
+folder dialog, or by command:
 
 ```text
 /hub folders                 list mounted folders
@@ -520,6 +637,85 @@ system folder chooser; type a path in the same block when no chooser is availabl
   DSH's private contracts. Once upstream PR #61 lands, this should switch to its official entry point.
   If a field stops matching, the switch fails and rolls back instead of corrupting a record.
   See [`docs/folders-feasibility.md`](docs/folders-feasibility.md).
+
+## Three entry points for folders (one component set, one write path)
+
+There are three places to change a folder and they behave the same way: all of them open the **same dialog**
+and all of them go through the host half's single write path in `src/mainfolder.js` (backup → realpath →
+validate → serialise → read back → roll back). There is no second implementation.
+
+| Entry | Where | Scope |
+| --- | --- | --- |
+| **A** | "Change folder…" plus the "Auxiliary folders" section on the board's **current-project card** | the current project only |
+| **B** | a new "Project folders" section on the settings page | **one row at a time**, any project or workspace |
+| **C** | a "⚙ More folders…" button injected into dsh-threads' own "Project settings → General → Folder" card | the project that card belongs to |
+
+All three state the same thing:
+
+> Changes are written into dsh-threads' project record and the DSH workspace record; dsh-threads' own
+> settings panel shows them only after a DSH restart (it reads its own client store and does not subscribe
+> to storage changes).
+
+Details:
+
+- **B deliberately has no "change everything"**: one stray click must never rewrite a dozen project records,
+  so it only edits one row at a time. A project row moves the project record and the workspace record
+  together; a workspace row moves only the workspace record. A workspace a project owns **cannot** be edited
+  on its own — the request is refused and points at the project row, because both records must move together.
+  A workspace no project uses can be moved alone (workspace.json only, with the same backup / read-back /
+  rollback).
+- **C's injection contract**: a `MutationObserver` looks for the `.dsht-setting-path` anchor inside
+  dsh-threads' folder card; no anchor means **no injection at all**; repeated triggers are **idempotent**
+  (one button per card, its copy refreshed with the language); every DOM read and write is inside
+  `try/catch`, so a changed DOM structure costs the button and never throws into the host or blanks the UI.
+  The card shows that project's folder path, and the button resolves it back to a project record before
+  opening the shared dialog.
+
+### The folder dialog (from 0.4.1)
+
+All three entries open the same dialog, and it has exactly these blocks:
+
+```text
+Project name (bold)
+Current main folder
+/Users/me/code/app                       ✕
+[Change…]  Type a path                     Saved (2s)
+──────────────────────────────────────────────
+Auxiliary folders  (2)
+  ▱ /Users/me/data              [Remove]
+  ▱ /Users/me/notes             [Remove]
+  [/Users/me/another____]  [Add]
+Auxiliary folders become writable sandbox roots for every session; changes are written to dsh-threads
+records, whose settings panel syncs after a restart.
+```
+
+- The dialog **portals into `document.body`** (container `#project-hub-dialog-root`, `role="dialog"`,
+  `aria-modal="true"`), so neither the sidebar panel, the settings sheet nor dsh-threads' own modal can sit
+  on top of it: a `z-index` on a `position: fixed` node is only ranked inside its own stacking context, and
+  one `transform` on an ancestor is enough to trap it.
+- Opening locks `body` scrolling; **Esc** closes and **clicking the scrim** closes.
+- The only success feedback is "Saved", which clears itself after 2 seconds — no toast, no alert, no prose.
+- Paths are single-line with an ellipsis; hover shows the full path.
+- The longer explanations (sandbox grants, the restart boundary, why two records must move together) live in
+  the sections below; the dialog keeps one footnote line.
+
+## Bilingual (follows the app language)
+
+**How to switch to English**: sidebar footer → Settings → General → the **Language** row → pick
+`English` (the row comes from DSH's own `dsh-client-locale`, so the core and other plugins follow too).
+No reload: this plugin's panel, dialog, settings page and injected button re-render immediately.
+
+Every string the panel, the dialog, the settings page and the injected button show lives in the
+`MESSAGES.zh` / `MESSAGES.en` tables in `src/client.js` (79 keys each; a test asserts both sides carry
+exactly the same keys, no empty copy, and no key that nothing shows):
+
+- The language comes from DSH's **locale service** (`dsh-client-locale`): `ctx.locale.getLocale()` reads the
+  active language, `ctx.on("locale/change")` follows a switch, and `ctx.locale.register("project-hub",
+  { zh, en })` registers the dictionaries. Switching the language re-renders the panel, dialog and settings
+  page immediately — no reload.
+- **Missing-key fallback order: active language → English → Chinese → the key itself.** English is the
+  backstop, so an untranslated key degrades to English instead of showing `board.section.others`.
+- Text rendered by the host (the sidebar tab label) is supplied as a thunk, so it follows the next host render.
 
 ## Install
 
@@ -621,12 +817,13 @@ Override in the profile's `cordis.patch.yml`:
 | `maxNotes` | `200` | Progress notes kept per project |
 | `maxDocs` | `200` | Knowledge documents allowed per project |
 | `maxKnowledgeChars` | `4000000` | Total knowledge characters allowed per project |
-| `hideResolvedThreads` | `true` | Hide resolved / archived threads from the board and injection; `board_list all=true` shows everything |
-| `autoConvergeReports` | `true` | Mirror thread reports onto the board as tasks (idempotent by `threadId`) |
+| `hideResolvedThreads` | `true` | **Initial** value for the ⚙ "show resolved and archived threads"; once set, `settings.json` wins. `board_list all=true` always shows everything for one call |
+| `autoConvergeReports` | `true` | **Initial** value for the ⚙ "roll thread reports into tasks" toggle (idempotent by `threadId`) |
 
 ## Data
 
 ```
+~/.dsh/project-hub/settings.json          board settings (language / threads / cards / sort; ours)
 ~/.dsh/project-hub/projects/<projectId>/
   knowledge.json   knowledge documents
   board.json       manual tasks
@@ -661,8 +858,13 @@ A main-folder switch does not touch this directory: it writes `~/.dsh/storages/d
   so it can lag up to 10 seconds).
 - Refreshes are polled: every 10 seconds plus on agent status changes, so a snapshot can be up to
   10 seconds stale.
-- The board hides resolved/archived threads by default; use `board_list all=true` or
-  `/hub board --all` to see everything.
+- The board hides resolved/archived threads by default (the ⚙ popover can show them);
+  `board_list all=true` or `/hub board --all` shows everything for one call.
+- The ⚙ "Manage project folders…" does not jump into the settings page: DSH exposes no client API to open
+  a specific settings section, so it renders the same manager component inside the popover instead
+  (one row at a time, no bulk action).
+- `hideResolvedThreads` / `autoConvergeReports` in the config are **initial defaults** only: once the panel
+  toggle is used, the settings file decides.
 
 ## Verification record (2026-11-18, local desktop profile)
 

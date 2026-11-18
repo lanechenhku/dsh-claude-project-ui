@@ -383,3 +383,90 @@ async function setMainFolderInner(options) {
     restartRequired: true
   };
 }
+/**
+ * Move one bare workspace's path — a workspace no dsh-threads project owns.
+ *
+ * Same discipline as {@link setMainFolder} (validate, back up, write, read back,
+ * roll back), but only workspace.json moves because there is no project record to
+ * keep in step. A workspace a project owns must be changed from that project:
+ * rewriting only the workspace would leave the project's folder pointing at the
+ * old directory while new sessions go somewhere else.
+ *
+ * Options: facility, workspacePath, workspaceId, folder, protectedTrees.
+ */
+export function setWorkspaceFolder(options) {
+  const workspaceFile = String(options?.workspacePath ?? "").trim();
+  if (workspaceFile.length === 0) throw new Error("没有 workspace 存储路径（workspaceStorage）");
+  const workspaceId = String(options?.workspaceId ?? "").trim();
+  if (workspaceId.length === 0) throw new Error("缺少 workspaceId");
+  return serialized("workspace\n" + workspaceFile, () =>
+    setWorkspaceFolderInner({ ...options, workspaceFile, workspaceId })
+  );
+}
+
+async function setWorkspaceFolderInner(options) {
+  const folder = validateMainFolder(options.folder, options.protectedTrees);
+  const workspaces = workspaceTarget(options.facility, options.workspaceFile);
+
+  const workspace = await workspaces.read(options.workspaceId);
+  if (workspace === null) throw new Error("DSH workspace 存储里没有 " + options.workspaceId);
+  const before = typeof workspace.path === "string" ? workspace.path : "";
+  if (before.length > 0 && sameFolder(before, folder)) {
+    return {
+      changed: false,
+      workspaceId: options.workspaceId,
+      before,
+      folder,
+      backups: [],
+      via: workspaces.via,
+      restartRequired: false
+    };
+  }
+  // DSH refuses to start when two workspaces claim one directory.
+  for (const other of await workspaces.list()) {
+    if (other === null || typeof other !== "object") continue;
+    if (other.id === options.workspaceId) continue;
+    if (typeof other.path !== "string" || other.path.length === 0) continue;
+    if (sameFolder(other.path, folder)) {
+      throw new Error(
+        "另一个工作区已经用了这个目录：" + folder + "（" + other.id + "）。换一个目录，否则 DSH 启动时的 workspace 一致性检查会失败。"
+      );
+    }
+  }
+
+  const backups = [];
+  const copy = await backup(options.workspaceFile);
+  if (copy !== null) backups.push(copy);
+
+  let wrote = false;
+  try {
+    await workspaces.write(options.workspaceId, { ...workspace, path: folder });
+    wrote = true;
+    const after = await workspaces.read(options.workspaceId);
+    if (after === null || after.path !== folder) {
+      throw new Error("写入后读回的路径是 " + String(after?.path ?? "（没有记录）") + "，不是 " + folder);
+    }
+  } catch (error) {
+    const problems = [];
+    if (wrote) {
+      await workspaces
+        .restore(options.workspaceId, "path", before)
+        .catch((failure) => problems.push(String(failure?.message ?? failure)));
+    }
+    const head = "切换工作区文件夹失败，已回滚到 " + (before.length > 0 ? before : "原值");
+    const tail = problems.length === 0 ? "" : "；回滚也出了问题：" + problems.join("；");
+    const keep = backups.length === 0 ? "" : "（备份：" + backups.join("、") + "）";
+    throw new Error(head + "：" + String(error?.message ?? error) + tail + keep);
+  }
+
+  return {
+    changed: true,
+    workspaceId: options.workspaceId,
+    before,
+    folder,
+    backups,
+    via: workspaces.via,
+    // Only sessions created after a DSH restart are placed from the new path.
+    restartRequired: true
+  };
+}

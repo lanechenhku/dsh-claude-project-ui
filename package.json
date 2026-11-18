@@ -1,6 +1,6 @@
 {
   "name": "dsh-claude-project-ui",
-  "version": "0.3.0",
+  "version": "0.4.1",
   "description": "Claude-style Projects + Threads for DeepSeek Harness: a project workspace UI on top of @kyf-eng/dsh-threads (shared project briefs, a cross-thread board panel, carried-over context).",
   "keywords": [
     "deepseek-harness",

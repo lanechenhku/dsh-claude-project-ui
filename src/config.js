@@ -27,9 +27,13 @@ export const DEFAULTS = {
   maxDocs: 200,
   /** Total characters of knowledge text a project may hold. */
   maxKnowledgeChars: 4000000,
-  /** Hide resolved/archived threads from the board and from the injected snapshot. board_list all=true or /hub board --all shows them. */
+  /** Initial value for "show resolved/archived threads" in the panel's own settings
+   * (the ⚙ popover). The panel toggle wins from then on: it is persisted in
+   * <dataDir>/settings.json. board_list all=true or /hub board --all still shows
+   * everything for one call. */
   hideResolvedThreads: true,
-  /** Mirror each thread report onto the board as an auto task (idempotent, keyed by thread id). */
+  /** Initial value for "roll thread reports into tasks" in the panel's settings
+   * (idempotent, keyed by thread id). The panel toggle wins from then on. */
   autoConvergeReports: true
 };
 

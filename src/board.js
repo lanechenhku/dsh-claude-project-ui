@@ -1,6 +1,6 @@
 import { nowIso, oneLine } from "./util.js";
 import { fit } from "./kb.js";
-import { threadBranch, threadState } from "./project.js";
+import { threadBranch, threadState, threadStateCode } from "./project.js";
 
 const FILE = "board";
 
@@ -80,7 +80,10 @@ export function boardView(project, threads, board, options = {}) {
     threads: visible.map((thread) => ({
       n: thread.n,
       title: thread.title,
+      // Label for prompt text, code for the panel: the panel must not be stuck
+      // showing Chinese rows in an English UI.
       state: threadState(thread),
+      code: threadStateCode(thread),
       branch: threadBranch(thread),
       report: typeof thread.lastReport?.summary === "string" ? oneLine(thread.lastReport.summary, 80) : null
     })),
