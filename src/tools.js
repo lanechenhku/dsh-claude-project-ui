@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { boardView, boardText, addTask, updateTask, loadBoard } from "./board.js";
+import { folderForPath, loadFolders } from "./folders.js";
 import { addNote, briefText, digestText, eventsOf, loadNotes } from "./digest.js";
 import { addDoc, getDoc, kbIndexText, loadKb, removeDoc, searchKb } from "./kb.js";
 import { oneLine, truncate } from "./util.js";
@@ -49,6 +50,18 @@ export function createTools(runtime, sessionId, defineTool) {
         let source = typeof args.source === "string" ? args.source : null;
         if (text.trim().length === 0 && typeof args.path === "string" && args.path.trim().length > 0) {
           const path = args.path.trim();
+          // This tool reads with the plugin's own rights, outside the file sandbox,
+          // so it enforces the project boundary itself: the main folder and the
+          // folders the user mounted, and nothing else.
+          const folders = await loadFolders(store, role.project.id);
+          const root = folderForPath(path, role.project.folder, folders.folders);
+          if (root === null) {
+            throw new Error(
+              `路径不在项目主文件夹或已挂载的辅助文件夹里：${path}\n` +
+                `主文件夹：${role.project.folder.length > 0 ? role.project.folder : "（未知）"}\n` +
+                `已挂载：${folders.folders.length > 0 ? folders.folders.join("、") : "（无；在「▤ 项目看板」页签或 /hub folders add <路径> 里添加）"}`
+            );
+          }
           let raw;
           try {
             raw = await readFile(path, "utf8");

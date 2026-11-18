@@ -4,12 +4,19 @@ export const DEFAULTS = {
   dataDir: "",
   /** dsh-threads storage file, read only, to learn which sessions belong to which project. */
   threadsStorage: "",
+  /** DSH workspace storage file, written only when switching a project's main folder.
+   * Empty = workspace.json next to threadsStorage. */
+  workspaceStorage: "",
   /** Cap for the injected knowledge index, in characters. Keep it small: dsh-knowledge owns long-form retrieval. */
   knowledgeIndexMaxChars: 280,
   /** How many documents the injected index lists before it just says "search with kb_search". */
   kbIndexMaxDocs: 3,
   /** Cap for the injected board snapshot, in characters. */
   boardContextMaxChars: 700,
+  /** How many auxiliary folders a project may mount on top of its main folder. */
+  maxExtraFolders: 8,
+  /** Cap for the injected auxiliary-folder list, in characters. */
+  foldersContextMaxChars: 600,
   /** Cap for the injected progress digest, in characters. */
   digestContextMaxChars: 700,
   /** Cap of the context_brief tool result, in characters. */

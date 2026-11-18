@@ -11,12 +11,17 @@ import {
   CONTEXT_ORDER,
   DIGEST_CONTEXT,
   DIGEST_ORDER,
+  FOLDERS_ORDER,
+  FOLDERS_SECTION,
   KB_SECTION,
   SECTION_ORDER,
   boardSectionText,
   digestSectionText,
+  foldersSectionText,
   kbSectionText
 } from "./prompts.js";
+import { addFolder, grantFolders, loadFolders, loadFoldersSync, removeFolder } from "./folders.js";
+import { defaultWorkspaceStorage, setMainFolder } from "./mainfolder.js";
 import { kbIndexText, loadKb, loadKbSync } from "./kb.js";
 import { boardContextText, boardView, convergeThreads, loadBoard, loadBoardSync } from "./board.js";
 import { digestText, eventsOf, loadNotes, loadNotesSync } from "./digest.js";
@@ -25,7 +30,10 @@ export const name = "dsh-claude-project-ui";
 // webServer is declared because Cordis refuses `ctx.get("webServer")` / `ctx.webServer`
 // unless the service is injected. Profiles without a web server (tui / headless) simply
 // keep this plugin waiting, which is the same trade-off dsh-git-graph makes.
-export const inject = ["tools", "agents", "commands", "webServer"];
+// storageDomain is declared for the same reason: switching a project's main folder has
+// to write through the domain handle dsh-threads and DSH already opened, or their next
+// write reverts the change (see src/mainfolder.js). It is a core DSH service.
+export const inject = ["tools", "agents", "commands", "webServer", "storageDomain"];
 
 // Both helpers live in the DSH host. Resolve them defensively so the module also
 // loads outside the host (tests, tooling) instead of failing at import time.
@@ -62,12 +70,39 @@ function breadcrumb(message) {
 
 breadcrumb("module imported");
 
+/**
+ * Read an optional Cordis service without declaring it in `inject`: a profile
+ * without the provider throws, and a missing service must never take the whole
+ * plugin down (headless / tui profiles load this package too).
+ */
+function lookupService(scope, serviceName) {
+  try {
+    return typeof scope?.get === "function" ? scope.get(serviceName) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function apply(ctx, config) {
   breadcrumb("apply start");
   const resolved = resolveConfig(config);
   const registry = new ProjectRegistry(resolved.threadsStorage.trim().length > 0 ? resolved.threadsStorage : defaultThreadsStorage());
   const store = new ProjectStore(resolved);
-  const runtime = { config: resolved, store, registry };
+  // Set once any session actually received a grant, so a service reachable
+  // from a session scope but not from this plugin's scope still counts.
+  let sandboxSeen = false;
+  const runtime = {
+    config: resolved,
+    store,
+    registry,
+    // Surfaced to the panel so a host without the sandbox service says so
+    // instead of showing folder chips that core tools cannot actually use.
+    sandboxAvailable: () => sandboxSeen || lookupService(ctx, "sandboxPolicy") !== undefined,
+    // The storage-domain facility (see src/mainfolder.js): a main-folder switch
+    // must go through the domain handle dsh-threads and DSH already opened, or the
+    // next write from either of them overwrites it. Absent => file fallback.
+    storageDomain: () => lookupService(ctx, "storageDomain")
+  };
 
   const warn = (message) => {
     try {
@@ -88,6 +123,7 @@ export async function apply(ctx, config) {
   // Registered on the web server when this profile has one (the web GUI does).
   // Optional on purpose: headless / tui profiles load this plugin too.
   const BOARD_ROUTE = "/project-hub/board";
+  const FOLDERS_ROUTE = "/project-hub/folders";
   const readBody = (req) =>
     new Promise((resolve, reject) => {
       let size = 0;
@@ -111,11 +147,16 @@ export async function apply(ctx, config) {
     for (const project of projects) {
       const threads = await registry.threadsOf(project.id);
       const board = await loadBoard(store, project.id);
+      const folders = await loadFolders(store, project.id);
       const view = boardView(project, threads, board);
       out.push({
         id: project.id,
         title: project.title,
         folder: project.folder,
+        // Ours (this plugin's record), and theirs (present only when the
+        // installed dsh-threads has the upstream folder feature).
+        extraFolders: folders.folders,
+        upstreamFolders: project.extraFolders ?? [],
         hidden: view.hidden,
         threads: view.threads.map((thread) => ({
           n: thread.n,
@@ -126,7 +167,7 @@ export async function apply(ctx, config) {
         tasks: view.tasks
       });
     }
-    return out;
+    return { projects: out, sandbox: { available: runtime.sandboxAvailable() } };
   };
 
   try {
@@ -138,9 +179,9 @@ export async function apply(ctx, config) {
         handler: async (req, res) => {
           try {
             if (req.method !== "GET") await readBody(req);
-            const projects = await boardSnapshot();
+            const snapshot = await boardSnapshot();
             res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-            res.end(JSON.stringify({ ok: true, projects }));
+            res.end(JSON.stringify({ ok: true, ...snapshot }));
           } catch (error) {
             res.writeHead(500, { "content-type": "application/json; charset=utf-8" });
             res.end(JSON.stringify({ ok: false, error: String(error?.message ?? error) }));
@@ -158,12 +199,108 @@ export async function apply(ctx, config) {
     breadcrumb("route failed: " + String(error));
   }
 
+  // ---- mounts: add / remove an auxiliary folder (the panel's only write path) ----
+  try {
+    const webServer = ctx.webServer;
+    if (webServer !== undefined && webServer !== null && typeof webServer.register === "function") {
+      const off = webServer.register({
+        kind: "exact",
+        path: FOLDERS_ROUTE,
+        handler: async (req, res) => {
+          const reply = (status, payload) => {
+            res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify(payload));
+          };
+          try {
+            if (req.method !== "POST") return reply(405, { ok: false, error: "只支持 POST" });
+            // A custom header makes this a non-simple request: a cross-site page
+            // cannot send it without a CORS preflight this route never answers.
+            if (req.headers["x-project-hub"] !== "1") {
+              return reply(403, { ok: false, error: "缺少 x-project-hub 请求头" });
+            }
+            const raw = await readBody(req);
+            const body = JSON.parse(raw.length > 0 ? raw : "{}");
+            const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
+            const projects = await registry.projects();
+            const project = projects.find((candidate) => candidate.id === projectId);
+            if (project === undefined) return reply(404, { ok: false, error: "没有这个项目" });
+            const action = String(body.action ?? "");
+            let state;
+            if (action === "add") {
+              state = await addFolder(store, project.id, {
+                path: body.path,
+                projectFolder: project.folder,
+                max: resolved.maxExtraFolders
+              });
+            } else if (action === "remove") {
+              state = await removeFolder(store, project.id, body.path);
+            } else if (action === "main") {
+              // Switch the project's MAIN folder: dsh-threads' project record plus the
+              // DSH workspace record new sessions are placed from. The current
+              // conversation keeps its directory — only a DSH restart moves new ones.
+              const switched = await setMainFolder({
+                facility: runtime.storageDomain(),
+                threadsPath: registry.path,
+                workspacePath: resolved.workspaceStorage.trim().length > 0
+                  ? resolved.workspaceStorage
+                  : defaultWorkspaceStorage(registry.path),
+                projectId: project.id,
+                folder: body.path,
+                protectedTrees: [store.root]
+              });
+              // Our panel reads dsh_threads.json directly: drop the cached parse so
+              // the very next snapshot shows the value that is on disk now.
+              registry.invalidate();
+              return reply(200, {
+                ok: true,
+                projectId: project.id,
+                folder: switched.folder,
+                changed: switched.changed,
+                before: switched.before,
+                workspace: switched.workspace,
+                via: switched.via,
+                backups: switched.backups,
+                restartRequired: switched.changed === true,
+                extraFolders: (await loadFolders(store, project.id)).folders,
+                sandbox: { available: runtime.sandboxAvailable() }
+              });
+            } else {
+              return reply(400, { ok: false, error: "action 只能是 add / remove / main" });
+            }
+            // Re-register the sandbox grants of live sessions right away instead
+            // of waiting for the next sweep.
+            syncAll();
+            reply(200, {
+              ok: true,
+              projectId: project.id,
+              folder: project.folder,
+              extraFolders: state.folders,
+              sandbox: { available: runtime.sandboxAvailable() }
+            });
+          } catch (error) {
+            reply(400, { ok: false, error: String(error?.message ?? error) });
+          }
+        }
+      });
+      if (typeof off === "function") ctx.effect?.(() => off, "dsh-claude-project-ui: folders route");
+      info("folder mounts route at " + FOLDERS_ROUTE);
+      breadcrumb("folders route registered at " + FOLDERS_ROUTE);
+    }
+  } catch (error) {
+    warn("cannot register the folders route: " + String(error));
+    breadcrumb("folders route failed: " + String(error));
+  }
 
-
-  /** sessionId -> { kb, board, digest } prompt text, read synchronously by the host. */
+  /** sessionId -> { kb, board, digest, folders } prompt text, read synchronously by the host. */
   const textCache = new Map();
   /** agent -> disposer for its sections and tools. */
   const installed = new Map();
+  /**
+   * agent -> { key, available, granted, dispose } for the session's sandbox
+   * grants. Runtime-only by design: the sandbox policy drops them on
+   * resume/fork, so the sweep re-registers whenever the mount list changes.
+   */
+  const grants = new Map();
 
   async function refresh(sessionId) {
     let role;
@@ -184,14 +321,16 @@ export async function apply(ctx, config) {
           warn("cannot converge thread reports: " + String(error))
         );
       }
-      const [kb, board, digest] = await Promise.all([
+      const [kb, board, digest, folders] = await Promise.all([
         loadKb(store, role.project.id),
         loadBoard(store, role.project.id),
-        loadNotes(store, role.project.id)
+        loadNotes(store, role.project.id),
+        loadFolders(store, role.project.id)
       ]);
       const view = boardView(role.project, threads, board, { all: resolved.hideResolvedThreads !== true });
       textCache.set(sessionId, {
         kb: kbSectionText(kbIndexText(kb, resolved.knowledgeIndexMaxChars, resolved.kbIndexMaxDocs), role.kind),
+        folders: foldersSectionText(folders.folders, resolved.foldersContextMaxChars),
         board: boardSectionText(boardContextText(view, resolved.boardContextMaxChars), role.kind),
         digest: digestSectionText(digestText(eventsOf(threads, digest.notes), resolved.digestContextMaxChars), role.kind)
       });
@@ -212,9 +351,11 @@ export async function apply(ctx, config) {
       const kb = loadKbSync(store, role.project.id);
       const board = loadBoardSync(store, role.project.id);
       const digest = loadNotesSync(store, role.project.id);
+      const folders = loadFoldersSync(store, role.project.id);
       const view = boardView(role.project, threads, board, { all: resolved.hideResolvedThreads !== true });
       textCache.set(sessionId, {
         kb: kbSectionText(kbIndexText(kb, resolved.knowledgeIndexMaxChars, resolved.kbIndexMaxDocs), role.kind),
+        folders: foldersSectionText(folders.folders, resolved.foldersContextMaxChars),
         board: boardSectionText(boardContextText(view, resolved.boardContextMaxChars), role.kind),
         digest: digestSectionText(digestText(eventsOf(threads, digest.notes), resolved.digestContextMaxChars), role.kind)
       });
@@ -235,6 +376,13 @@ export async function apply(ctx, config) {
           name: KB_SECTION,
           order: SECTION_ORDER,
           text: () => textCache.get(sessionId)?.kb ?? ""
+        })
+      );
+      disposers.push(
+        scope.systemPrompt.section({
+          name: FOLDERS_SECTION,
+          order: FOLDERS_ORDER,
+          text: () => textCache.get(sessionId)?.folders ?? ""
         })
       );
       disposers.push(
@@ -277,6 +425,62 @@ export async function apply(ctx, config) {
     });
   }
 
+  /**
+   * Keep one live session's extra writable roots equal to the project's mounts.
+   * `registerWritableRoot` is a public DSH service method (dsh-sandbox-policy):
+   * the grant is per session, runtime-only, and owned by the returned disposer.
+   * Without the service we record `available: false` and grant nothing — the
+   * panel says so instead of pretending the folders are writable.
+   */
+  function reconcileGrants(agent, project) {
+    const folders = grantFolders(project.folder, loadFoldersSync(store, project.id).folders);
+    const key = folders.join("\n");
+    const current = grants.get(agent);
+    if (current !== undefined && current.key === key) return;
+
+    current?.dispose();
+    const policy = lookupService(agent.ctx, "sandboxPolicy") ?? lookupService(ctx, "sandboxPolicy");
+    if (policy === undefined || typeof policy.registerWritableRoot !== "function") {
+      grants.set(agent, { key, available: false, granted: 0, dispose: () => {} });
+      return;
+    }
+    sandboxSeen = true;
+    if (agent.session === undefined || agent.session === null) {
+      grants.set(agent, { key, available: true, granted: 0, dispose: () => {} });
+      return;
+    }
+    const disposers = [];
+    let granted = 0;
+    for (const folder of folders) {
+      try {
+        const dispose = policy.registerWritableRoot(agent.session, folder);
+        if (typeof dispose === "function") disposers.push(dispose);
+        granted += 1;
+      } catch (error) {
+        warn("cannot grant " + folder + " to session " + agent.id + ": " + String(error?.message ?? error));
+      }
+    }
+    grants.set(agent, {
+      key,
+      available: true,
+      granted,
+      dispose: () => {
+        for (const dispose of disposers) {
+          try {
+            dispose?.();
+          } catch {
+            // ignore
+          }
+        }
+      }
+    });
+  }
+
+  function releaseGrants(agent) {
+    grants.get(agent)?.dispose();
+    grants.delete(agent);
+  }
+
   async function sync(agent) {
     let role;
     try {
@@ -284,8 +488,12 @@ export async function apply(ctx, config) {
     } catch {
       return;
     }
-    if (role.project === null) return;
+    if (role.project === null) {
+      releaseGrants(agent);
+      return;
+    }
     install(agent, role);
+    reconcileGrants(agent, role.project);
     await refresh(agent.id);
   }
 
@@ -300,7 +508,10 @@ export async function apply(ctx, config) {
     // Register before the first step is prepared: a new thread must see the board on step one.
     try {
       const role = registry.roleOfSync(agent.id);
-      if (role.project !== null) install(agent, role);
+      if (role.project !== null) {
+        install(agent, role);
+        reconcileGrants(agent, role.project);
+      }
     } catch (error) {
       warn("sync install failed: " + String(error));
     }
@@ -316,6 +527,7 @@ export async function apply(ctx, config) {
   ctx.on("agent/disposed", ({ agent }) => {
     installed.get(agent)?.();
     installed.delete(agent);
+    releaseGrants(agent);
     textCache.delete(agent.id);
   });
 
@@ -326,6 +538,8 @@ export async function apply(ctx, config) {
     () => () => {
       for (const dispose of installed.values()) dispose();
       installed.clear();
+      for (const grant of grants.values()) grant.dispose();
+      grants.clear();
       textCache.clear();
     },
     "dsh-project-hub: sessions"

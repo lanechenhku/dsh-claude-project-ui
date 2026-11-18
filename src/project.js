@@ -45,6 +45,12 @@ export class ProjectRegistry {
     return data;
   }
 
+  /** Drop the cached parse: called after this plugin changes dsh-threads' record
+   * so the next snapshot reads what is on disk now instead of a stale copy. */
+  invalidate() {
+    this.cache = { at: 0, mtimeMs: -1, data: null };
+  }
+
   /** Every project, newest activity first. */
   async projects() {
     const { projects } = await this.load();
@@ -134,6 +140,11 @@ function normalize(parsed) {
       id: raw.id,
       title: String(raw.title ?? "未命名项目"),
       folder: typeof raw.folder === "string" ? raw.folder : "",
+      // Present only when the installed dsh-threads has the upstream folder
+      // feature (PR #61). Read-only here: its own list, never ours.
+      extraFolders: Array.isArray(raw.extraFolders)
+        ? raw.extraFolders.filter((entry) => typeof entry === "string" && entry.length > 0)
+        : [],
       mainSessionId: typeof raw.mainSessionId === "string" ? raw.mainSessionId : "",
       instructions: typeof raw.instructions === "string" ? raw.instructions : "",
       goal: typeof raw.goal === "string" ? raw.goal : "",

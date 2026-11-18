@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.3.0 — 2026-11-18
+
+新增**辅助文件夹（多目录挂载）**与**项目主文件夹切换**：一个项目除主文件夹外可以挂多个目录，提示词、
+沙箱授权、本插件自己的文件工具三条都通；主文件夹可以在面板或 `/hub folder` 里真的切换
+（写入 dsh-threads 的项目记录 + DSH 的 workspace 记录，**当前对话不动、重启后新会话跟随**）。
+
+- 新增 `src/folders.js`：挂载列表存本插件自己的 `projects/<id>/folders.json`（**不写** dsh-threads 的
+  `dsh_threads.json`，两边各管各的存储）；路径落盘前 `realpath` 归一化为物理绝对路径
+  （DSH 沙箱不接受 symlink 拼写的额外根），非目录 / 读不到的路径直接拒绝；同一项目的挂载写入串行化。
+- 系统提示：新增 `project-hub/folders` section，给主对话和每个讨论串列出挂载目录
+  （`foldersContextMaxChars`，默认 600）。
+- 沙箱：宿主半对项目里每个存活会话调用 `ctx.sandboxPolicy.registerWritableRoot(session, dir)`；
+  授权按会话、运行时有效，10 秒刷新循环在挂载变化后重新登记；`read-only` 不授予写权限。
+- 面板（浏览器半）：「▤ 项目看板」里每个项目多一块文件夹区：主文件夹（`切换文件夹…` 按钮走系统选择器，
+  选择器不可用时手填路径；成功后显示「已切换 + 重启后新会话才用新目录、当前对话仍在原目录」的说明）、
+  辅助文件夹列表 + 添加 / 移除；宿主没有 `sandboxPolicy` 服务时明确标注「核心文件工具仍只允许主文件夹」，
+  不静默降级。该区文案中英双语（读 `locale` 服务，读不到就用浏览器语言）。新增宿主路由
+  `POST /project-hub/folders`（要求 `x-project-hub: 1` 请求头，挡掉跨站请求），`action` 支持
+  `add` / `remove` / `main`。
+- 新增 `src/mainfolder.js`（**切换主文件夹**，移植 dsh-threads PR #61 的服务端语义）：
+  - 同时改两处记录，缺一不写：`~/.dsh/storages/dsh_threads.json` 的 `tables.projects[<id>].folder`
+    （dsh-threads 渲染与面板显示）与 `~/.dsh/storages/workspace.json` 的 `tables.workspaces[<ws>].path`
+    （**新会话的目录来源**）。只改前者会是「面板显示新目录、新会话还在旧目录」的假切换。
+  - 写入优先走 `ctx.storageDomain` 里 dsh-threads / DSH 已经打开的 domain（内存态权威、写链串行，
+    避免外部直写被下一次写覆盖）；宿主没暴露该服务时退化为「重新读取 → 原子 rename」，并在面板标注。
+  - 写前把两个存储文件各备份成 `<文件>.bak-mainfolder-<时间戳>`；写后读回校验，不一致或抛错就回滚两处记录，
+    错误带到面板（或 `/hub folder`），不静默。
+  - 校验：存在 + 是目录 + `realpath` 归一化（去尾斜杠、解 symlink）；拒绝 `/`、`/Applications`、`/System`、
+    `/Library`、`/usr` 等系统目录、用户主目录本身、`~/.dsh`（含子目录）、`~/.ssh` 与本插件数据目录；
+    目录已被另一个 DSH workspace 占用时拒绝。写入按存储路径串行化（同一目录连点两次不会交错）。
+  - **生效边界**：只写记录、不改活动会话的工作目录，所以
+
+    > 新会话和新讨论串要等 DSH 重启之后才用新文件夹；当前这个对话在重启前仍留在原目录。
+
+    面板（中英文案）与 `/hub folder` 都按这个语义写，不说「立即生效」。
+- **行为变化**：`kb_add` 的 `path` 现在只接受主文件夹与已挂载目录里的文件，其它路径报错并列出可用挂载
+  （它用插件自己的权限读盘，边界必须由插件自己兜）。
+- `/hub` 命令新增 `folders`、`folders add <路径>`、`folders rm <路径>`，以及 `folder` / `folder <路径>`
+  （看 / 切换主文件夹，走与面板同一个 writer，便于在 tui / headless 里调试）；
+  `/hub doctor` 显示挂载数、沙箱授权状态与文件夹注入字符数。
+- 配置：`maxExtraFolders`（默认 8）、`foldersContextMaxChars`（默认 600）、
+  `workspaceStorage`（默认与 `threadsStorage` 同目录的 `workspace.json`，只在切换主文件夹时写）。
+- 宿主半 `inject` 增加 `storageDomain`：切换主文件夹必须通过 dsh-threads / DSH 已打开的 domain 写链，
+  否则下一次它们自己的写会把改动覆盖掉（丢更新）。
+- 文档：README 中英各补「辅助文件夹（多目录挂载）」一节、配置表、数据目录与已知限制；
+  新增 `docs/folders-feasibility.md`（沙箱 API / 主文件夹切换 / `settings.section` / 右栏页签的只读验证证据）。
+- 测试：`test/harness.mjs` 30 项（新增 extraFolders 持久化、提示注入 + 沙箱授权、`/hub folders`、
+  文件夹路由鉴权与增删；主文件夹切换正常改 / 目录不存在被拒 / 非法路径被拒（`/Applications`、`/`、`~/.dsh`、
+  相对路径）/ 未知字段保留 / 并发写后不丢数据 / 已被占用的目录被拒 / storage-domain 写链 / `/hub folder` /
+  路由返回 `restartRequired`），`test/spec-check.mjs` 10 个工具 schema 全绿。
+
 ## 0.2.1 — 2026-11-18
 
 代码行为与 0.2.0 一致（`src/` 未改）；这一版只为把仓库里的文档同步到 npm 页面，并给发布加一道门禁。

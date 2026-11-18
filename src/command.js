@@ -2,7 +2,10 @@ import { existsSync, statSync } from "node:fs";
 import { addNote, digestText, eventsOf, loadNotes } from "./digest.js";
 import { addDoc, kbIndexText, loadKb, searchKb } from "./kb.js";
 import { boardContextText, boardText, boardView, convergeThreads, loadBoard, addTask, removeTask, updateTask } from "./board.js";
+import { addFolder, loadFolders, removeFolder } from "./folders.js";
+import { defaultWorkspaceStorage, setMainFolder } from "./mainfolder.js";
 import { composeBrief } from "./tools.js";
+import { foldersSectionText } from "./prompts.js";
 import { oneLine } from "./util.js";
 
 const MAX_OPS = 12;
@@ -18,6 +21,10 @@ const USAGE = [
   "  /hub kb [关键词]        知识库列表，或直接检索",
   "  /hub brief             生成可直接粘进 thread_open.task 的项目上下文",
   "  /hub note <文本>        记一条项目级上下文（所有会话可见）",
+  "  /hub folders           列出已挂载的辅助文件夹",
+  "  /hub folders add <路径>  挂载一个辅助文件夹（绝对路径或 ~/ 开头）",
+  "  /hub folders rm <路径>   移除一个辅助文件夹",
+  "  /hub folder             看项目主文件夹；/hub folder <路径> 切换（当前对话不动，重启后新会话才用新目录）",
   "  /hub add <标题> | <正文>  加一篇知识库文档（正文可省略，之后用 kb_add 补）"
 ].join("\n");
 
@@ -48,8 +55,8 @@ export function registerHubCommand(ctx, runtime, commandDefinitionId) {
   ctx.commands.register({
     definitionId: commandDefinitionId("dsh-project-hub"),
     name: "hub",
-    description: "项目共享知识库、跨讨论串看板与上下文简报：/hub status|board|task|done|rm|kb|brief|note|add|doctor",
-    input: { hint: "status | board [--all] | task <title> | done <id> | rm <id> | kb [query] | brief | note <text> | add <title> | doctor" },
+    description: "项目共享知识库、跨讨论串看板、文件夹（辅助挂载 + 主文件夹切换）与上下文简报：/hub status|board|task|done|rm|kb|brief|note|folders|folder|add|doctor",
+    input: { hint: "status | board [--all] | task <title> | done <id> | rm <id> | kb [query] | brief | note <text> | folders [add|rm <path>] | folder [<path>] | add <title> | doctor" },
     handler: async ({ agent, rawInput }) => {
       const role = await runtime.registry.roleOf(agent.id).catch(() => null);
       if (role === null || role.project === null) {
@@ -110,6 +117,10 @@ async function run(runtime, role, operation) {
       }
       case "doctor":
         return { kind: "success", text: await doctor(runtime, role) };
+      case "folders":
+        return await folderCommand(runtime, project, tail);
+      case "folder":
+        return await mainFolderCommand(runtime, project, tail);
       case "kb": {
         const kb = await loadKb(runtime.store, project.id);
         if (tail.length > 0) {
@@ -151,6 +162,84 @@ async function run(runtime, role, operation) {
   } catch (error) {
     return { kind: "error", text: `/hub ${verb} 失败：${String(error?.message ?? error)}` };
   }
+}
+
+/**
+ * `/hub folder [<path>]`: show or switch the project's main folder. Same writer as
+ * the panel button, including the backup / validation / rollback path.
+ */
+async function mainFolderCommand(runtime, project, tail) {
+  const current = project.folder.length > 0 ? project.folder : "（未知）";
+  const requested = tail.replace(/^set\s+/i, "").trim();
+  if (requested.length === 0) {
+    return {
+      kind: "success",
+      text: [
+        "主文件夹：" + current,
+        "切换：/hub folder <绝对路径>（也接受 ~/ 开头）",
+        "语义：当前这个对话仍留在原目录；重启 DSH 之后新建的会话和讨论串才用新目录。"
+      ].join("\n")
+    };
+  }
+  const result = await setMainFolder({
+    facility: runtime.storageDomain?.() ?? undefined,
+    threadsPath: runtime.registry.path,
+    workspacePath: runtime.config.workspaceStorage?.trim().length > 0
+      ? runtime.config.workspaceStorage
+      : defaultWorkspaceStorage(runtime.registry.path),
+    projectId: project.id,
+    folder: requested,
+    protectedTrees: [runtime.store.root]
+  });
+  runtime.registry.invalidate?.();
+  if (result.changed !== true) {
+    return { kind: "success", text: "主文件夹已经是 " + result.folder + "，没有改。" };
+  }
+  const via = result.via === "service"
+    ? "storage-domain 写链（dsh-threads / DSH 的内存状态同步更新）"
+    : "文件直写（宿主没有暴露 storageDomain，重启前可能被覆盖）";
+  return {
+    kind: "success",
+    text: [
+      "主文件夹：" + (result.before.length > 0 ? result.before : "（未知）") + " → " + result.folder,
+      "写入方式：" + via,
+      "当前这个对话仍留在原目录；重启 DSH 之后新建的会话和讨论串才用新目录。",
+      result.backups.length > 0 ? "备份：" + result.backups.join("、") : ""
+    ].filter((line) => line.length > 0).join("\n")
+  };
+}
+
+/** `/hub folders`: list, mount or unmount one auxiliary folder. */
+async function folderCommand(runtime, project, tail) {
+  const add = tail.match(/^add\s+([\s\S]+)$/i);
+  const remove = tail.match(/^(?:rm|remove)\s+([\s\S]+)$/i);
+  if (add !== null) {
+    const state = await addFolder(runtime.store, project.id, {
+      path: add[1].trim(),
+      projectFolder: project.folder,
+      max: runtime.config.maxExtraFolders
+    });
+    return {
+      kind: "success",
+      text: "已挂载：" + state.folders[state.folders.length - 1] + "\n现在共 " + state.folders.length + " 个辅助文件夹；沙箱授权下一次刷新生效。"
+    };
+  }
+  if (remove !== null) {
+    const before = (await loadFolders(runtime.store, project.id)).folders.length;
+    const state = await removeFolder(runtime.store, project.id, remove[1].trim());
+    return { kind: "success", text: "已移除（" + before + " → " + state.folders.length + " 个辅助文件夹）。" };
+  }
+  const state = await loadFolders(runtime.store, project.id);
+  if (state.folders.length === 0) {
+    return { kind: "success", text: "还没有挂载辅助文件夹：/hub folders add <绝对路径>，或在右侧「▤ 项目看板」页签里添加。" };
+  }
+  return {
+    kind: "success",
+    text: ["辅助文件夹 " + state.folders.length + " 个："]
+      .concat(state.folders.map((folder) => "- " + folder))
+      .concat(["用 /hub folders rm <路径> 移除。"])
+      .join("\n")
+  };
 }
 
 async function status(runtime, role) {
@@ -197,17 +286,24 @@ async function doctor(runtime, role) {
     `dsh-threads 存储：${storage} ${mark(storageOk)}` + (storageOk ? ` (${(storageSize / 1024).toFixed(0)} KB)` : "（读不到）")
   );
 
-  const [threads, kb, board, notes] = await Promise.all([
+  const [threads, kb, board, notes, folders] = await Promise.all([
     runtime.registry.threadsOf(project.id),
     loadKb(runtime.store, project.id),
     loadBoard(runtime.store, project.id),
-    loadNotes(runtime.store, project.id)
+    loadNotes(runtime.store, project.id),
+    loadFolders(runtime.store, project.id)
   ]);
 
   const open = threads.filter((thread) => thread.resolved !== true && thread.archived !== true).length;
   const auto = board.tasks.filter((task) => typeof task.threadId === "string").length;
   lines.push(`讨论串：${threads.length} 个（未解决 ${open}，已解决/归档 ${threads.length - open}）`);
   lines.push(`看板：手动 ${board.tasks.length - auto} 条 + 自动汇总 ${auto} 条`);
+
+  const sandboxOk = typeof runtime.sandboxAvailable === "function" ? runtime.sandboxAvailable() : false;
+  lines.push(
+    `辅助文件夹：${folders.folders.length} 个 / ${config.maxExtraFolders}（沙箱可写根 ${mark(sandboxOk)}）` +
+      (sandboxOk ? "" : "（宿主没有 sandboxPolicy：核心文件工具仍只允许主文件夹）")
+  );
 
   const kbChars = kb.docs.reduce((sum, doc) => sum + doc.text.length, 0);
   const kbOk = kb.docs.length <= config.maxDocs && kbChars <= config.maxKnowledgeChars;
@@ -219,9 +315,10 @@ async function doctor(runtime, role) {
     config.boardContextMaxChars
   ).length;
   const digestInject = digestText(eventsOf(threads, notes.notes), config.digestContextMaxChars).length;
-  const total = kbInject + boardInject + digestInject;
+  const foldersInject = foldersSectionText(folders.folders, config.foldersContextMaxChars).length;
+  const total = kbInject + boardInject + digestInject + foldersInject;
   lines.push(
-    `每轮注入：知识 ${kbInject} + 看板 ${boardInject} + 进展 ${digestInject} = ${total} 字符 ${mark(total <= 1800)}`
+    `每轮注入：知识 ${kbInject} + 看板 ${boardInject} + 进展 ${digestInject} + 文件夹 ${foldersInject} = ${total} 字符 ${mark(total <= 1800)}`
   );
   lines.push(
     `开关：hideResolvedThreads=${config.hideResolvedThreads} · autoConvergeReports=${config.autoConvergeReports} · 笔记 ${notes.notes.length}/${config.maxNotes}`
