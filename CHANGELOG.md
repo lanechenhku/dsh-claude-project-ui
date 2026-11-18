@@ -8,7 +8,7 @@
   修两处 heading 前缺空行、英文看板段多出来的一行 `right:`。
 - `package.json` 加 `prepublishOnly` 门禁：`node test/harness.mjs && node test/spec-check.mjs`，
   以后 `npm publish` 前必过测试与 schema 校验。
-- `INSTALL-LOCAL.md` 的本机绝对路径换成占位符（`<path-to-this-repo>` / `<timestamp>`），tarball 例子改指 0.2.0。
+- `INSTALL-LOCAL.md` removed from the public repo: the local install notes (machine-specific absolute paths and backup-directory names) now live in a private folder outside this repository. The file was never shipped in the npm package.
 - GitHub 仓库主页 homepage 指向 npm 包页：<https://www.npmjs.com/package/dsh-claude-project-ui>
 
 ## 0.2.0 — 2026-11-17（npm 首发）
