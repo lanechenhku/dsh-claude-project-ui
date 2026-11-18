@@ -1,12 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 — 2026-11-18
 
-- 文档：README 补「快速开始（3 步）」「配置项表」「License」三节（中英各一份）；修两处 heading 前缺空行、
-  英文看板段的一句残句（多余的一行 `right:`）。
+代码行为与 0.2.0 一致（`src/` 未改）；这一版只为把仓库里的文档同步到 npm 页面，并给发布加一道门禁。
+
+- 文档：README 补「快速开始（3 步）」「配置项表（字段 / 默认值 / 影响）」「License」三节，中英各一份；
+  修两处 heading 前缺空行、英文看板段多出来的一行 `right:`。
 - `package.json` 加 `prepublishOnly` 门禁：`node test/harness.mjs && node test/spec-check.mjs`，
   以后 `npm publish` 前必过测试与 schema 校验。
-- `INSTALL-LOCAL.md` 的个人绝对路径换成占位符。
+- `INSTALL-LOCAL.md` 的本机绝对路径换成占位符（`<path-to-this-repo>` / `<timestamp>`），tarball 例子改指 0.2.0。
+- GitHub 仓库主页 homepage 指向 npm 包页：<https://www.npmjs.com/package/dsh-claude-project-ui>
 
 ## 0.2.0 — 2026-11-17（npm 首发）
 
