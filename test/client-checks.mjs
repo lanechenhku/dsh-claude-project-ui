@@ -184,6 +184,7 @@ export async function runClientChecks(check, clientPath) {
   const helpers = plugin.__test;
   const { MESSAGES, translate, normalizeLang, sortProjects, relativeTime, findProjectByFolder, toneOf, threadCode, taskStatus, createThreadsInjector, langStore, dialogStore, emptyBoard } = helpers;
   const { resolveLanguage, normalizeClientSettings, sameSettings, SETTINGS_DEFAULTS, settingsStore, panelStore } = helpers;
+  const { pickFolderFrom, pickerAvailableFrom, pickerAvailable } = helpers;
 
   check("i18n: both dictionaries carry every key, with no empty value", () => {
     const zh = Object.keys(MESSAGES.zh).sort();
@@ -318,6 +319,68 @@ export async function runClientChecks(check, clientPath) {
     if (findProjectByFolder(projects, "/Users/me/other")?.id !== "p2") throw new Error("stored path with a trailing slash");
     if (findProjectByFolder(projects, "/Users/me") !== null) throw new Error("a parent path must not match");
     if (findProjectByFolder(projects, "") !== null) throw new Error("an empty path must match nothing");
+  });
+
+  check("folders: the browser offers the OS chooser only when one answers", async () => {
+    // DSH's own directory flows use the same two sources: the Desktop bridge
+    // (contextBridge over dsh-desktop:directory-pick) first, then the Host's
+    // uiWorkspace.pickDirectory(). The dialog shows 浏览… only when one exists.
+    const bridge = { pick: async () => "/Users/me/Desktop/picked" };
+    const host = { pickDirectory: async () => "/Users/me/host-picked" };
+    if (pickerAvailableFrom(bridge, host) !== true) throw new Error("the desktop bridge is a chooser");
+    if (pickerAvailableFrom(undefined, host) !== true) throw new Error("the host picker is a chooser");
+    if (pickerAvailableFrom(undefined, undefined) !== false) throw new Error("no source must mean no button");
+    if (pickerAvailableFrom({}, { pickDirectory: "not a function" }) !== false) throw new Error("a shape without calls is not a chooser");
+    if (pickerAvailableFrom(null, null) !== false) throw new Error("null sources must mean no button");
+
+    if (await pickFolderFrom(bridge, host) !== "/Users/me/Desktop/picked") throw new Error("the bridge must win when both exist");
+    if (await pickFolderFrom(undefined, host) !== "/Users/me/host-picked") throw new Error("the host picker is the fallback");
+
+    // A cancelled chooser is a path of null, never an error.
+    if (await pickFolderFrom({ pick: async () => null }, undefined) !== null) throw new Error("cancel must stay null");
+    if (await pickFolderFrom({ pick: async () => undefined }, undefined) !== undefined) throw new Error("an undefined answer must pass through");
+
+    // No chooser: "unavailable", so the dialog can fall back to typing.
+    if (await pickFolderFrom(undefined, undefined) !== "unavailable") throw new Error("no chooser must be unavailable, not a throw");
+
+    // A Host that says it has none is "unavailable" too — the caller types instead.
+    const refusing = { pickDirectory: async () => { throw new Error("directory picker unavailable: the composed picker serves browse"); } };
+    if (await pickFolderFrom(undefined, refusing) !== "unavailable") throw new Error("a refusing host must degrade to typing");
+
+    // A real failure stays a rejection: the dialog hides the button and keeps the input.
+    let failed = false;
+    try {
+      await pickFolderFrom({ pick: async () => { throw new Error("ipc boom"); } }, undefined);
+    } catch (error) {
+      failed = /ipc boom/.test(String(error && error.message));
+    }
+    if (!failed) throw new Error("a failing chooser must reject for the caller to catch");
+
+    // pickerAvailable() reads the same two sources through a service reader.
+    const read = (name) => (name === "uiWorkspace" ? host : undefined);
+    const saved = globalThis.__DSH_DIRECTORY_PICKER__;
+    try {
+      globalThis.__DSH_DIRECTORY_PICKER__ = bridge;
+      if (pickerAvailable(read) !== true) throw new Error("a bridge in globalThis must enable the button");
+      delete globalThis.__DSH_DIRECTORY_PICKER__;
+      if (pickerAvailable(read) !== true) throw new Error("the host service must enable the button");
+      if (pickerAvailable(() => undefined) !== false) throw new Error("neither source must hide the button");
+    } finally {
+      if (saved === undefined) delete globalThis.__DSH_DIRECTORY_PICKER__;
+      else globalThis.__DSH_DIRECTORY_PICKER__ = saved;
+    }
+  });
+
+  check("folders: 浏览… is one click away in both languages, and never writes on its own", () => {
+    // The button sits in the auxiliary add row; it fills the input and leaves the
+    // write to the human's 添加. Both languages must carry the label.
+    if (MESSAGES.zh["dialog.browse"] !== "浏览…") throw new Error("zh label: " + MESSAGES.zh["dialog.browse"]);
+    if (MESSAGES.en["dialog.browse"] !== "Browse…") throw new Error("en label: " + MESSAGES.en["dialog.browse"]);
+    const source = readFileSync(clientPath, "utf8");
+    if (!/actions\.pickerVisible === true/.test(source)) throw new Error("the add row no longer guards the browse button");
+    if (!/onClick: actions\.browse/.test(source)) throw new Error("the browse button lost its handler");
+    if (!/setDraft\(picked\)/.test(source)) throw new Error("a pick must fill the input instead of writing");
+    if (!/PICK_TIMEOUT_MS/.test(source)) throw new Error("a chooser that never answers must not keep the button disabled");
   });
 
   check("injection: one button per card, re-scans are idempotent, labels refresh", () => {

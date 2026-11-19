@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.2 — 2026-11-19
+
+**原生文件夹选择器**。0.4.1 只发到了 GitHub（tag 与 Release），**没有发 npm**；0.4.2 是 0.4.1 之后的
+第一个 npm 版本，内容等于 0.4.1 + 本节。
+
+- **「浏览…」按钮**（辅助文件夹那一行）：点了直接弹 DSH 自己用的原生文件夹选择器。
+  - Desktop 应用走 `window.__DSH_DIRECTORY_PICKER__.pick()`（preload 的 contextBridge 桥到
+    主进程 `dsh-desktop:directory-pick` → `dialog.showOpenDialog`）；其余环境走宿主
+    `uiWorkspace.pickDirectory()`。
+  - 选中只把**绝对路径填进输入框**，仍要按「添加」才写入——不会误点一次就挂载。
+  - 宿主没有选择器时按钮**根本不渲染**；调用中途失败则静默收起，手输路径照旧。
+- 证据链（主进程 / preload / 渲染端消费点，含文件与行号）记录在
+  [`docs/native-directory-picker.md`](docs/native-directory-picker.md)。
+- 文案：`浏览…` / `Browse…`，以及两条失败提示，中英各一份。
+- 测试：harness 52 → **54** 条全绿。
+
 ## 0.4.1 — 2026-11-18
 
 **弹窗真的在最上层 + 弹窗信息结构重做**（0.4.0 的真机反馈）。仍是 0.4.x，只改浏览器半的弹窗与文案。

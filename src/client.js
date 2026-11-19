@@ -44,6 +44,8 @@ window.__ModuleLoader__.load({
     const DIALOG_ROOT_ID = "project-hub-dialog-root";
     /** Id of the dialog's accessible name node. */
     const DIALOG_TITLE_ID = "project-hub-dialog-title";
+    /** How long a "Browse…" click may stay pending before the button frees itself. */
+    const PICK_TIMEOUT_MS = 120000;
 
     function warn(message, error) {
       try {
@@ -102,6 +104,7 @@ window.__ModuleLoader__.load({
         "dialog.currentMain": "当前主文件夹",
         "dialog.change": "更换…",
         "dialog.choosing": "选择中…",
+        "dialog.browse": "浏览…",
         "dialog.manualLink": "手动输入路径",
         "dialog.confirm": "确定",
         "dialog.cancel": "取消",
@@ -200,6 +203,7 @@ window.__ModuleLoader__.load({
         "dialog.currentMain": "Current main folder",
         "dialog.change": "Change…",
         "dialog.choosing": "Choosing…",
+        "dialog.browse": "Browse…",
         "dialog.manualLink": "Type a path",
         "dialog.confirm": "Set",
         "dialog.cancel": "Cancel",
@@ -589,13 +593,16 @@ window.__ModuleLoader__.load({
 
     /**
      * The folder chooser DSH itself uses (dsh-client-ui-directory-picker-native):
-     * Electron's dialog on Desktop through the global, the host's picker otherwise.
-     * Resolves a path, null when the user cancels, or "unavailable".
+     * Electron's own dialog on Desktop through `window.__DSH_DIRECTORY_PICKER__`
+     * (contextBridge over the IPC channel `dsh-desktop:directory-pick`), and the
+     * Host's picker through `uiWorkspace.pickDirectory()` everywhere else.
+     *
+     * Both sources are read defensively and the pair is pure over them, so the
+     * dialog can ask "is a chooser reachable?" before it offers a button, and a
+     * host with neither never shows one.
      */
-    async function pickFolder(service) {
-      const desktop = typeof globalThis !== "undefined" ? globalThis.__DSH_DIRECTORY_PICKER__ : undefined;
+    async function pickFolderFrom(desktop, workspace) {
       if (desktop && typeof desktop.pick === "function") return await desktop.pick();
-      const workspace = service("uiWorkspace");
       if (workspace && typeof workspace.pickDirectory === "function") {
         try {
           return await workspace.pickDirectory();
@@ -604,7 +611,49 @@ window.__ModuleLoader__.load({
           throw error;
         }
       }
+      // No chooser at all: the caller falls back to typing a path.
       return "unavailable";
+    }
+
+    /** Whether either chooser is reachable; a bridge that throws on a read is "no". */
+    function pickerAvailableFrom(desktop, workspace) {
+      try {
+        if (desktop && typeof desktop.pick === "function") return true;
+        if (workspace && typeof workspace.pickDirectory === "function") return true;
+      } catch (error) {
+        // only a hostile proxy throws here, and it is not a chooser
+      }
+      return false;
+    }
+
+    /** Read both chooser sources; a missing service or a locked-down global is "none". */
+    function pickerSources(read) {
+      const reader = typeof read === "function" ? read : service;
+      let desktop;
+      let workspace;
+      try {
+        desktop = typeof globalThis !== "undefined" ? globalThis.__DSH_DIRECTORY_PICKER__ : undefined;
+      } catch (error) {
+        desktop = undefined;
+      }
+      try {
+        workspace = reader("uiWorkspace");
+      } catch (error) {
+        workspace = undefined;
+      }
+      return { desktop, workspace };
+    }
+
+    /** Resolves a path, null when the user cancels, or "unavailable". */
+    function pickFolder(read) {
+      const sources = pickerSources(read);
+      return pickFolderFrom(sources.desktop, sources.workspace);
+    }
+
+    /** Would a "browse" button lead anywhere in this host? */
+    function pickerAvailable(read) {
+      const sources = pickerSources(read);
+      return pickerAvailableFrom(sources.desktop, sources.workspace);
     }
 
     // The session whose conversation the panel is open next to. Session-scoped
@@ -1297,6 +1346,10 @@ window.__ModuleLoader__.load({
       const [draft, setDraft] = React.useState("");
       const [switched, setSwitched] = React.useState(null);
       const [savedScope, setSavedScope] = useSavedScope();
+      // Decided once, when the dialog opens: a host without a chooser never
+      // renders the button at all, so nothing has to fail to find that out.
+      const [pickerVisible, setPickerVisible] = React.useState(() => pickerAvailable());
+      const [picking, setPicking] = React.useState(false);
 
       // A different subject means different state: never carry a notice across.
       React.useEffect(() => {
@@ -1388,6 +1441,49 @@ window.__ModuleLoader__.load({
         );
       };
 
+      /**
+       * "Browse…": open the OS chooser and put the picked directory in the add
+       * box, without writing anything — the human still presses 添加.
+       *
+       * Every outcome degrades to typing: a chooser that says it has none, one
+       * that rejects, and one that never answers (the timeout frees the button
+       * while a late answer is dropped) all leave the input usable and, except
+       * for the explicit "no chooser here", retire the button silently.
+       */
+      const browse = () => {
+        if (picking) return;
+        setError(null);
+        setNote(null);
+        setPicking(true);
+        let settled = false;
+        const finish = () => {
+          if (settled) return false;
+          settled = true;
+          setPicking(false);
+          return true;
+        };
+        const timer = setTimeout(() => finish(), PICK_TIMEOUT_MS);
+        pickFolder(service).then(
+          (picked) => {
+            clearTimeout(timer);
+            if (!finish()) return;
+            if (picked === "unavailable") {
+              setPickerVisible(false);
+              setError(t("dialog.pickUnavailable"));
+              return;
+            }
+            if (picked === null || picked === undefined) return;
+            setDraft(picked);
+          },
+          (failure) => {
+            clearTimeout(timer);
+            if (!finish()) return;
+            setPickerVisible(false);
+            warn("the folder chooser failed", failure);
+          }
+        );
+      };
+
       return {
         t,
         isProject,
@@ -1401,10 +1497,13 @@ window.__ModuleLoader__.load({
         draft,
         switched,
         savedScope,
+        pickerVisible,
+        picking,
         setManual,
         setManualPath,
         setDraft,
         choose,
+        browse,
         writeMain,
         submitAux,
         cancelManual: () => {
@@ -1561,6 +1660,22 @@ window.__ModuleLoader__.load({
                     if (event.key === "Enter" && actions.draft.trim().length > 0 && !actions.busy) actions.submitAux("add", actions.draft);
                   }
                 }),
+                // The OS chooser, when this host has one: same source as the
+                // main folder's 更换… — the pick only fills the box, the human
+                // still presses 添加, so nothing is written by a browse.
+                actions.pickerVisible === true
+                  ? h(
+                      "button",
+                      {
+                        type: "button",
+                        style: actions.busy || actions.picking ? S.buttonDisabled : S.button,
+                        disabled: actions.busy || actions.picking,
+                        title: t("dialog.browse"),
+                        onClick: actions.browse
+                      },
+                      actions.picking ? t("dialog.choosing") : t("dialog.browse")
+                    )
+                  : null,
                 h(
                   "button",
                   {
@@ -2690,6 +2805,10 @@ window.__ModuleLoader__.load({
         langStore,
         dialogStore,
         emptyBoard,
+        pickFolderFrom,
+        pickerAvailableFrom,
+        pickFolder,
+        pickerAvailable,
         INJECT_ATTR,
         TAB_ID,
         SETTINGS_SECTION_ID

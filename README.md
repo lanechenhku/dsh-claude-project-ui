@@ -54,6 +54,24 @@
 而且走 dsh-threads 已经打开的 domain 句柄、带备份与回滚。任何一个卸载，另一个照常工作；
 dsh-threads 换存储格式时本插件静默降级为「不注入」，不会报错。
 
+## 比 Claude Projects 多出的东西
+
+同一件事（项目 / 讨论串 / 任务），Claude Projects 有一套原设计；在 DSH 里，这套东西的形状不太一样。
+下表只列**代码里确实做到、并且和原设计有差别**的几处，每行一句，细节在下面各节。
+
+| 能力 | Claude Projects | 本插件 |
+|---|---|---|
+| 项目总览 | 项目列表，进项目才看得到会话 | 侧栏一屏铺开所有项目：当前项目置顶卡（左侧强调条），其余按最近活动倒序，每行带讨论串数 / 任务数 / 最近活动时间 |
+| 多目录挂载 | 一个项目一个工作目录 | 项目可再挂多个辅助文件夹：每个会话登记为沙箱可写根（宿主提供沙箱策略时），新会话的提示里直接给绝对路径，`kb_add` 只在主文件夹与已挂载目录里取文件 |
+| 文件夹入口 | 项目设置一处 | 三个入口共用同一个弹窗、同一条写入路径：看板卡「更换…」、设置页逐项目一行、讨论串设置里的「⚙ 更多文件夹⋯」 |
+| 看板设置 | 没有看板设置 | 看板右上 ⚙：语言、显示已解决/已归档、回报汇总、「其他项目」卡片默认折叠/展开、排序、文件夹管理——改完立即生效，存在本插件自己的 `settings.json` 里，不改配置、不重启 |
+| 中英切换 | 界面语言跟随应用 | 97 条文案中英各一份，可在 ⚙ 里锁定中文或 English，切换当下重渲染，不用改 `cordis.yml` |
+| 回报变任务 | 没有跨会话任务看板 | 讨论串每轮回报按 `threadId` 幂等汇总成任务（done / doing / pending / blocked），已解决的讨论串不再生成新任务 |
+| 选文件夹 | 建项目或换目录时选一次 | 切换主文件夹、每次加辅助文件夹都能弹系统原生选择框（Desktop 走 Electron 对话框，其余环境走宿主 picker）；拿不到选择器就不渲染按钮，手输路径照旧 |
+
+这不是「替代 Claude Projects」——两个是不同产品（本插件运行在 DeepSeek Harness 上，需要 dsh-threads），
+表里只说明同类需求在这里怎么解；没有代码支撑的对比不写。
+
 ## 功能
 
 ### 知识库
@@ -230,7 +248,7 @@ hover 背景 `rgba(127,127,127,0.06)`、**不用大阴影**、字号 12/13、路
 辅助文件夹  (2)
   ▱ /Users/me/data              [移除]
   ▱ /Users/me/notes             [移除]
-  [/Users/me/another____]  [添加]
+  [/Users/me/another____]  [浏览…]  [添加]
 辅助文件夹会登记为每个会话的沙箱可写根；改动写入 dsh-threads 记录，其设置面板重启后同步。
 ```
 
@@ -240,6 +258,11 @@ hover 背景 `rgba(127,127,127,0.06)`、**不用大阴影**、字号 12/13、路
 - 打开时锁 `body` 滚动；**Esc** 关闭、**点遮罩**关闭。
 - 成功反馈只有「已保存」，2 秒后自己消失；没有 toast，没有 alert，没有大段说明。
 - 路径单行省略，鼠标悬停显示全路径。
+- **「浏览…」**（0.4.1 起，辅助文件夹那一行）：点了弹 DSH 自己用的原生文件夹选择器——Desktop 应用里走
+  `window.__DSH_DIRECTORY_PICKER__`（Electron `dialog.showOpenDialog`），其余环境走宿主
+  `uiWorkspace.pickDirectory()`。选中只把绝对路径**填进输入框**，仍要按「添加」才写入。
+  宿主没有选择器时按钮**压根不渲染**；中途失败则静默收起，手输路径照旧。
+  两条链路的证据（主进程 / preload / 渲染端消费点）见 [`docs/native-directory-picker.md`](docs/native-directory-picker.md)。
 - 更长的解释（沙箱授权语义、重启边界、两处记录为什么要一起改）都在本文档下面的章节里，弹窗里只剩一行脚注。
 
 ## 双语（跟随应用语言）
@@ -249,7 +272,7 @@ hover 背景 `rgba(127,127,127,0.06)`、**不用大阴影**、字号 12/13、路
 设置页、注入按钮会立刻重渲染。
 
 面板、弹窗、设置页和注入按钮的**所有**文案都在 `src/client.js` 的 `MESSAGES.zh` / `MESSAGES.en` 两张表里
-（各 79 个 key；测试会校验两侧 key 完全一致、没有空文案、并且没有「表里有但没地方用」的 key）：
+（各 97 个 key；测试会校验两侧 key 完全一致、没有空文案、并且没有「表里有但没地方用」的 key）：
 
 - 语言来自 DSH 的 **locale 服务**（`dsh-client-locale`）：`ctx.locale.getLocale()` 读当前语言、
   `ctx.on("locale/change")` 跟随切换、`ctx.locale.register("project-hub", { zh, en })` 登记字典。
@@ -480,6 +503,24 @@ workspace record, through the domain handle dsh-threads already opened, with a b
 Uninstalling either leaves the other working; if dsh-threads changes its storage format, this plugin
 silently degrades to "no injection" instead of throwing.
 
+## What goes beyond Claude Projects
+
+The same job — projects, threads, tasks — but shaped a little differently in DSH. Only the differences the code
+actually implements, one line each; the sections below carry the detail.
+
+| Capability | Claude Projects | This plugin |
+|---|---|---|
+| Project overview | A project list; sessions appear after you open one | Every project on one sidebar page: the current project on a top card with an accent rail, the rest ordered by last activity, each row carrying thread count / task count / last active |
+| Extra folders | One working directory per project | A project can mount extra folders: each session gets them as writable sandbox roots (when the host exposes a sandbox policy), new sessions are told the absolute paths, and `kb_add` only reads inside the main folder or a mounted one |
+| Folder entry points | Project settings only | Three entries share one dialog and one write path: "Change…" on the board card, one row per project on the settings page, and "⚙ More folders…" in dsh-threads' own settings card |
+| Board settings | None | ⚙ at the top of the board: language, show resolved/archived, roll reports into tasks, other cards collapsed/expanded by default, sort, folder management — applied immediately and stored in this plugin's own `settings.json`, no config edit, no restart |
+| Bilingual | UI follows the app language | 97 strings in both tables; pin 中文 or English in ⚙ and the panel re-renders at once, no `cordis.yml` edit |
+| Reports become tasks | No cross-session task board | Each thread report becomes a task, deduplicated by `threadId` (done / doing / pending / blocked); resolved threads stop creating new ones |
+| Choosing a folder | Pick once when creating or moving a project | Both the main-folder switch and every "add extra folder" can open the OS folder chooser (Electron dialog on Desktop, the host picker elsewhere); with no chooser the button is not rendered and a typed path still works |
+
+Not a claim of replacement: this plugin runs on DeepSeek Harness and needs dsh-threads. The table only says how the
+same needs are solved here; anything without code behind it is left out.
+
 ## Features
 
 ### Knowledge base
@@ -706,7 +747,7 @@ records, whose settings panel syncs after a restart.
 No reload: this plugin's panel, dialog, settings page and injected button re-render immediately.
 
 Every string the panel, the dialog, the settings page and the injected button show lives in the
-`MESSAGES.zh` / `MESSAGES.en` tables in `src/client.js` (79 keys each; a test asserts both sides carry
+`MESSAGES.zh` / `MESSAGES.en` tables in `src/client.js` (97 keys each; a test asserts both sides carry
 exactly the same keys, no empty copy, and no key that nothing shows):
 
 - The language comes from DSH's **locale service** (`dsh-client-locale`): `ctx.locale.getLocale()` reads the
