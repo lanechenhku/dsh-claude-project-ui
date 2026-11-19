@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.3 — 2026-11-19
+
+**只改描述，没有代码变化。** 把 `package.json` 的 `description` 换成与 README / GitHub About 一致的说法。
+
+为什么为此单发一版：npm 包页面**和 dsh-plugin.org 的商店标题**都读这个字段，旧描述还停在
+「shared project briefs, a cross-thread board panel」，没提 0.4.x 加的东西（多文件夹挂载、
+中英双语、⚙ 面板设置、原生文件夹选择器）。改 description 必须发新版才会生效。
 ## 0.4.2 — 2026-11-19
 
 **原生文件夹选择器**。0.4.1 只发到了 GitHub（tag 与 Release），**没有发 npm**；0.4.2 是 0.4.1 之后的
